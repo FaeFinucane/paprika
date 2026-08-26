@@ -63,9 +63,7 @@ def test_object_snapshot_payloads_are_isolated() -> None:
     affect = {"valence": 0.2}
     session = ResponseSession()
     session.begin(
-        SessionSnapshot(
-            np.zeros(1), np.zeros(1, dtype=int), np.array([0.3]), affect=affect
-        )
+        SessionSnapshot(np.zeros(1), np.zeros(1, dtype=int), np.array([0.3]), affect=affect)
     )
 
     affect["valence"] = 1.0
@@ -98,9 +96,7 @@ def test_parallel_execution_copies_neural_activity_and_weights() -> None:
     execution.neural.synaptic_activity[1] = 7.0
     execution.weights[1] = 7.0
 
-    np.testing.assert_array_equal(
-        execution.initial_synaptic_activity_state.activity, [0.5, 0.0]
-    )
+    np.testing.assert_array_equal(execution.initial_synaptic_activity_state.activity, [0.5, 0.0])
     assert weights.tolist() == [8.0, 0.4]
 
 
@@ -128,9 +124,7 @@ def test_weight_conflict_policy_is_explicit() -> None:
 
 
 def test_initial_synaptic_activity_uses_weighted_decayed_average() -> None:
-    state = SynapticActivityState.aggregate(
-        [np.array([0.0]), np.array([1.0])], decay=0.5
-    )
+    state = SynapticActivityState.aggregate([np.array([0.0]), np.array([1.0])], decay=0.5)
     assert state.activity[0] == pytest.approx(2 / 3)
 
     updated = state.update(np.array([0.0]), decay=0.5)
@@ -140,11 +134,7 @@ def test_initial_synaptic_activity_uses_weighted_decayed_average() -> None:
 def test_execution_snapshot_can_aggregate_activity_baseline() -> None:
     execution = SessionExecutionSnapshot(snapshot(), np.array([0.2, 0.4]))
 
-    updated = execution.aggregate_initial_synaptic_activity(
-        np.array([1.0, 0.0]), decay=0.5
-    )
+    updated = execution.aggregate_initial_synaptic_activity(np.array([1.0, 0.0]), decay=0.5)
 
     assert updated.activity[0] == pytest.approx(5 / 6)
-    np.testing.assert_array_equal(
-        execution.initial_synaptic_activity_state.activity, [5 / 6, 0.0]
-    )
+    np.testing.assert_array_equal(execution.initial_synaptic_activity_state.activity, [5 / 6, 0.0])

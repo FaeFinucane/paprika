@@ -33,9 +33,7 @@ class SpikingNetwork:
     ) -> "SpikingNetwork":
         rng = np.random.default_rng(seed)
         neurons = LIFNeurons(neuron_count)
-        synapses = SparseSynapses.random(
-            neuron_count, connection_probability, rng
-        )
+        synapses = SparseSynapses.random(neuron_count, connection_probability, rng)
         return cls(neurons, synapses)
 
     def step(self, external_current: np.ndarray | None = None) -> np.ndarray:
@@ -46,9 +44,7 @@ class SpikingNetwork:
         else:
             external = np.asarray(external_current, dtype=float)
             if external.shape != (self.neurons.count,):
-                raise ValueError(
-                    f"external_current must have shape ({self.neurons.count},)"
-                )
+                raise ValueError(f"external_current must have shape ({self.neurons.count},)")
 
         spikes = self.neurons.step(self._pending_current + external)
         self._pending_current = self.synapses.transmit(spikes)

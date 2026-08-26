@@ -52,9 +52,9 @@ class LIFNeurons:
 
         active = self.refractory == 0
         self.refractory[~active] -= 1
-        self.voltage[active] += (
-            self.dt / self.tau_membrane
-        ) * (-(self.voltage[active] - self.resting_potential) + current[active])
+        self.voltage[active] += (self.dt / self.tau_membrane) * (
+            -(self.voltage[active] - self.resting_potential) + current[active]
+        )
 
         spikes = active & (self.voltage >= self.threshold)
         self.voltage[spikes] = self.reset_potential

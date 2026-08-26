@@ -17,15 +17,29 @@ def make_layout() -> PopulationLayout:
         char_count=char_count,
         affect_subgroups={
             name: slice(affect_start + index * 4, affect_start + (index + 1) * 4)
-            for index, name in enumerate(("valence", "arousal", "uncertainty", "curiosity", "threat", "competence", "social_affiliation"))
+            for index, name in enumerate(
+                (
+                    "valence",
+                    "arousal",
+                    "uncertainty",
+                    "curiosity",
+                    "threat",
+                    "competence",
+                    "social_affiliation",
+                )
+            )
         },
         action_subgroups={
             name: slice(action_start + index * 4, action_start + (index + 1) * 4)
-            for index, name in enumerate(("answer", "clarify", "acknowledge", "uncertain", "revise", "refuse", "wait"))
+            for index, name in enumerate(
+                ("answer", "clarify", "acknowledge", "uncertain", "revise", "refuse", "wait")
+            )
         },
         char_subgroups={
             name: slice(char_start + index * 3, char_start + (index + 1) * 3)
-            for index, name in enumerate(("<EOS>", "m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!"))
+            for index, name in enumerate(
+                ("<EOS>", "m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!")
+            )
         },
     )
 
@@ -45,7 +59,12 @@ def test_default_subgroups_have_expected_bounds_and_sizes():
         (Population.OUTPUT_CHAR, current.char_subgroups, 3),
     ):
         bounds = current.slice(population)
-        assert all(group.start >= bounds.start and group.stop <= bounds.stop and group.stop - group.start == size for group in groups.values())
+        assert all(
+            group.start >= bounds.start
+            and group.stop <= bounds.stop
+            and group.stop - group.start == size
+            for group in groups.values()
+        )
     assert "<EOS>" in current.char_subgroups
 
 

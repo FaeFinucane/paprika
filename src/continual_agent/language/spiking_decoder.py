@@ -6,8 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from continual_agent.simulation.synapses import SparseSynapses
 from continual_agent.simulation.population_layout import Population, PopulationLayout
+from continual_agent.simulation.synapses import SparseSynapses
 
 
 @dataclass(frozen=True)
@@ -79,9 +79,7 @@ class SpikingCharacterDecoder:
         for feature in range(input_count):
             for token in range(self.token_count):
                 start = feature * self.neuron_count + token * self.neurons_per_token
-                indices[feature, token] = np.arange(
-                    start, start + self.neurons_per_token
-                )
+                indices[feature, token] = np.arange(start, start + self.neurons_per_token)
         return indices
 
     def align_next_token(
@@ -100,9 +98,7 @@ class SpikingCharacterDecoder:
         update = self.learning_rate * active_features
         selected_edges = edge_indices[:, target_index]
         synapses.weight[selected_edges] += update[:, None] / self.neurons_per_token
-        synapses.weight[selected_edges] = np.clip(
-            synapses.weight[selected_edges], -1.0, 1.0
-        )
+        synapses.weight[selected_edges] = np.clip(synapses.weight[selected_edges], -1.0, 1.0)
 
     def align_recurrent_token(
         self,
@@ -134,9 +130,7 @@ class SpikingCharacterDecoder:
         if selected.size == 0:
             return
         update = self.learning_rate * np.maximum(source[synapses.source[selected]], 0.0)
-        synapses.weight[selected] = np.clip(
-            synapses.weight[selected] + update, -1.0, 1.0
-        )
+        synapses.weight[selected] = np.clip(synapses.weight[selected] + update, -1.0, 1.0)
 
     def target_tokens(self, text: str) -> tuple[str, ...]:
         clean = "".join(character for character in text.lower() if character in self.alphabet)

@@ -101,13 +101,9 @@ class AffectiveState:
         self.valence += self.update_rate * rpe
         self.competence += self.update_rate * (rpe if rpe >= 0 else 0.5 * rpe)
         self.threat += self.update_rate * (threat - self.threat)
-        self.arousal += self.update_rate * (
-            max(urgency, threat) - self.arousal
-        )
+        self.arousal += self.update_rate * (max(urgency, threat) - self.arousal)
         self.uncertainty += self.update_rate * (uncertainty - self.uncertainty)
-        self.curiosity += self.update_rate * (
-            novelty * progress - self.curiosity * 0.25
-        )
+        self.curiosity += self.update_rate * (novelty * progress - self.curiosity * 0.25)
         self.social_affiliation += self.update_rate * (
             _clip(0.5 + 0.5 * event.social_feedback) - self.social_affiliation
         )
@@ -120,19 +116,20 @@ class AffectiveState:
         """Return the global third-factor multiplier for plasticity."""
 
         return _clip(
-            0.5
-            + 0.5 * self.uncertainty
-            + 0.25 * self.curiosity
-            + 0.25 * self.arousal
-        , 0.1, 2.0)
+            0.5 + 0.5 * self.uncertainty + 0.25 * self.curiosity + 0.25 * self.arousal, 0.1, 2.0
+        )
 
     def derived_labels(self) -> dict[str, float]:
         """Return inspectable, non-primitive affect labels."""
 
         return {
-            "happy_like": _clip(0.5 + 0.5 * self.valence + 0.25 * self.competence - 0.25 * self.threat),
+            "happy_like": _clip(
+                0.5 + 0.5 * self.valence + 0.25 * self.competence - 0.25 * self.threat
+            ),
             "alarmed_like": _clip(0.5 * self.threat + 0.5 * self.arousal),
-            "exploratory_like": _clip(self.curiosity * (1.0 - self.threat) * (0.5 + 0.5 * self.arousal)),
+            "exploratory_like": _clip(
+                self.curiosity * (1.0 - self.threat) * (0.5 + 0.5 * self.arousal)
+            ),
             "uncertain_like": _clip(0.5 * self.uncertainty + 0.5 * (1.0 - self.competence)),
         }
 

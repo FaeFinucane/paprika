@@ -63,23 +63,15 @@ cleanup decisions are intentionally not listed as active tasks.
 
 ## Codebase structure and quality
 
-- Split `src/continual_agent/agent/conversation_agent.py` into cohesive modules
-  before it grows further. Keep orchestration thin and move configuration,
-  response lifecycle, input handling, output generation, and training/reward
-  responsibilities behind focused interfaces. Aim for a soft maximum of 300
-  lines per source file; deviations should be documented by necessity rather
-  than enforced through arbitrary fragmentation.
-- Establish automated code-quality rules in the development toolchain. At
-  minimum, use established tools rather than inventing a project-specific
-  linter: Ruff for formatting/import/lint checks and a type checker such as
-  mypy or pyright where practical. A small repository-specific check is
-  appropriate only for the genuinely local architectural rule about source
-  files exceeding the agreed size limit. Run the standard tools alongside
-  pytest in the standard verification command or CI entry point.
-- Define which rules are architectural requirements versus style preferences,
-  configure them in `pyproject.toml`, and add tests/checks for public API
-  boundaries such as population-only addressing and the canonical event-output
-  path.
+Completed: `conversation_agent.py` is now a thin public facade; configuration,
+response lifecycle/output, and event training live in focused modules. Runtime
+network/session state has one owner, and failed raw-event streams clean up their
+transient state. Ruff and mypy are configured in `pyproject.toml`; pytest,
+Ruff, mypy, and the synthetic experiment are the documented verification set.
+
+Architectural requirements are enforced by the production APIs and tests:
+population layout owns addressing, and `EventReadout` owns event output.
+Formatting and import/lint rules are style gates supplied by Ruff.
 
 ## Safety and resources
 

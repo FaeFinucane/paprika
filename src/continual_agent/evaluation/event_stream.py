@@ -96,29 +96,45 @@ class EventStreamReport:
 
     @property
     def counts(self) -> dict[EventOutcome, int]:
-        return {outcome: sum(record.outcome is outcome for record in self.records)
-                for outcome in EventOutcome}
+        return {
+            outcome: sum(record.outcome is outcome for record in self.records)
+            for outcome in EventOutcome
+        }
 
     @property
     def event_precision(self) -> float:
-        emitted = sum(record.outcome in {
-            EventOutcome.CORRECT_EVENT, EventOutcome.INCORRECT_EVENT,
-            EventOutcome.UNWANTED_OUTPUT, EventOutcome.PREMATURE_EOS,
-        } for record in self.records)
+        emitted = sum(
+            record.outcome
+            in {
+                EventOutcome.CORRECT_EVENT,
+                EventOutcome.INCORRECT_EVENT,
+                EventOutcome.UNWANTED_OUTPUT,
+                EventOutcome.PREMATURE_EOS,
+            }
+            for record in self.records
+        )
         return self.counts[EventOutcome.CORRECT_EVENT] / emitted if emitted else 0.0
 
     @property
     def event_recall(self) -> float:
-        expected = sum(record.outcome in {
-            EventOutcome.CORRECT_EVENT, EventOutcome.MISSING_OUTPUT,
-            EventOutcome.MISSING_EOS,
-        } for record in self.records)
+        expected = sum(
+            record.outcome
+            in {
+                EventOutcome.CORRECT_EVENT,
+                EventOutcome.MISSING_OUTPUT,
+                EventOutcome.MISSING_EOS,
+            }
+            for record in self.records
+        )
         return self.counts[EventOutcome.CORRECT_EVENT] / expected if expected else 0.0
 
     @property
     def response_latency(self) -> int | None:
-        values = [record.timestamp for record in self.records
-                  if record.outcome is EventOutcome.CORRECT_EVENT and record.timestamp is not None]
+        values = [
+            record.timestamp
+            for record in self.records
+            if record.outcome is EventOutcome.CORRECT_EVENT and record.timestamp is not None
+        ]
         return min(values) if values else None
 
     @property
@@ -146,20 +162,24 @@ def evaluate_event_stream(
     config: EventStreamConfig | None = None,
     end_time: int | None = None,
     silence_intervals: Iterable[SilenceInterval] = (),
+    withheld_prefix: int = 0,
 ) -> EventStreamReport:
     """Account for an ordered stream without imposing fixed inter-event timing.
 
     ``end_time`` closes the final patience window. Without it, an unfinished
     target is not declared missing merely because the caller stopped observing.
+    ``withheld_prefix`` accounts for leading targets whose output was
+    intentionally unavailable during input presentation.
     """
     config = config or EventStreamConfig()
     expected = [_coerce_target(target) for target in targets]
-    events = [_ObservedEvent(event.name, event.timestamp)
-              if isinstance(event, OutputEvent) else _ObservedEvent(str(event), index)
-              for index, event in enumerate(observed)]
-    target_timestamps = [
-        target.timestamp for target in expected if target.timestamp is not None
+    events = [
+        _ObservedEvent(event.name, event.timestamp)
+        if isinstance(event, OutputEvent)
+        else _ObservedEvent(str(event), index)
+        for index, event in enumerate(observed)
     ]
+    target_timestamps = [target.timestamp for target in expected if target.timestamp is not None]
     if any(timestamp < 0 for timestamp in target_timestamps):
         raise ValueError("target timestamps must be non-negative")
     if any(left >= right for left, right in zip(target_timestamps, target_timestamps[1:])):
@@ -171,15 +191,30 @@ def evaluate_event_stream(
         raise ValueError("observed timestamps must increase")
     if end_time is not None and end_time < 0:
         raise ValueError("end_time must be non-negative")
+    if withheld_prefix < 0 or withheld_prefix > len(expected):
+        raise ValueError("withheld_prefix must be within the target stream")
+    if any(target.label == "<EOS>" for target in expected[:withheld_prefix]):
+        raise ValueError("withheld_prefix must not include EOS")
     report = EventStreamReport()
     silence = tuple(silence_intervals)
-    position = 0
+    position = withheld_prefix
     eos_seen = False
     last_timestamp: int | None = None
 
-    def add(outcome: EventOutcome, label: str | None, timestamp: int | None, reward: float,
-            latency: int | None = None, timing_error: int | None = None) -> None:
-        report.records.append(AccountedEvent(outcome, label, timestamp, reward, latency, timing_error))
+    def add(
+        outcome: EventOutcome,
+        label: str | None,
+        timestamp: int | None,
+        reward: float,
+        latency: int | None = None,
+        timing_error: int | None = None,
+    ) -> None:
+        report.records.append(
+            AccountedEvent(outcome, label, timestamp, reward, latency, timing_error)
+        )
+
+    for target in expected[:withheld_prefix]:
+        add(EventOutcome.MISSING_OUTPUT, target.label, target.timestamp, config.missing_reward)
 
     for event in events:
         if last_timestamp is None:
@@ -193,10 +228,19 @@ def evaluate_event_stream(
             continue
         while position < len(expected):
             target = expected[position]
-            if target.timestamp is None or event.timestamp <= target.timestamp + config.patience_window:
+            if (
+                target.timestamp is None
+                or event.timestamp <= target.timestamp + config.patience_window
+            ):
                 break
-            outcome = EventOutcome.MISSING_EOS if target.label == "<EOS>" else EventOutcome.MISSING_OUTPUT
-            reward = config.missing_eos_reward if outcome is EventOutcome.MISSING_EOS else config.missing_reward
+            outcome = (
+                EventOutcome.MISSING_EOS if target.label == "<EOS>" else EventOutcome.MISSING_OUTPUT
+            )
+            reward = (
+                config.missing_eos_reward
+                if outcome is EventOutcome.MISSING_EOS
+                else config.missing_reward
+            )
             add(outcome, target.label, target.timestamp, reward)
             position += 1
         if position >= len(expected):
@@ -208,18 +252,35 @@ def evaluate_event_stream(
             continue
         if event.name == "<EOS>" and target.label != "<EOS>":
             report.premature_eos += 1
-            add(EventOutcome.PREMATURE_EOS, event.name, event.timestamp, config.premature_eos_reward)
+            add(
+                EventOutcome.PREMATURE_EOS, event.name, event.timestamp, config.premature_eos_reward
+            )
             eos_seen = True
             continue
-        early_ok = (config.early_tolerance is None or target.timestamp is None or
-                    event.timestamp >= target.timestamp - config.early_tolerance)
+        early_ok = (
+            config.early_tolerance is None
+            or target.timestamp is None
+            or event.timestamp >= target.timestamp - config.early_tolerance
+        )
         if event.name == target.label and early_ok:
-            latency = (event.timestamp - target.timestamp if target.timestamp is not None
-                       and config.measure_latency else None)
-            timing = (event.timestamp - target.timestamp if target.timestamp is not None
-                      and config.measure_timing_error else None)
-            add(EventOutcome.CORRECT_EVENT, event.name, event.timestamp,
-                config.correct_reward, latency, timing)
+            latency = (
+                event.timestamp - target.timestamp
+                if target.timestamp is not None and config.measure_latency
+                else None
+            )
+            timing = (
+                event.timestamp - target.timestamp
+                if target.timestamp is not None and config.measure_timing_error
+                else None
+            )
+            add(
+                EventOutcome.CORRECT_EVENT,
+                event.name,
+                event.timestamp,
+                config.correct_reward,
+                latency,
+                timing,
+            )
             position += 1
             if target.label == "<EOS>":
                 eos_seen = True
@@ -230,19 +291,34 @@ def evaluate_event_stream(
     if end_time is not None:
         while position < len(expected):
             target = expected[position]
-            deadline = (target.timestamp + config.patience_window
-                        if target.timestamp is not None else end_time)
+            deadline = (
+                target.timestamp + config.patience_window
+                if target.timestamp is not None
+                else end_time
+            )
             if deadline > end_time:
                 break
-            outcome = EventOutcome.MISSING_EOS if target.label == "<EOS>" else EventOutcome.MISSING_OUTPUT
-            reward = config.missing_eos_reward if outcome is EventOutcome.MISSING_EOS else config.missing_reward
+            outcome = (
+                EventOutcome.MISSING_EOS if target.label == "<EOS>" else EventOutcome.MISSING_OUTPUT
+            )
+            reward = (
+                config.missing_eos_reward
+                if outcome is EventOutcome.MISSING_EOS
+                else config.missing_reward
+            )
             add(outcome, target.label, deadline, reward)
             position += 1
-    if position < len(expected) and expected[position].label == "<EOS>" and not eos_seen and end_time is not None:
+    if (
+        position < len(expected)
+        and expected[position].label == "<EOS>"
+        and not eos_seen
+        and end_time is not None
+    ):
         report.eos_accuracy = False
     if end_time is not None:
-        report.silence_duration += max(0, end_time - (last_timestamp if last_timestamp is not None else -1))
+        report.silence_duration += max(
+            0, end_time - (last_timestamp if last_timestamp is not None else -1)
+        )
     if report.silence_duration:
-        add(EventOutcome.VALID_SILENCE, None, None,
-            config.silence_reward)
+        add(EventOutcome.VALID_SILENCE, None, None, config.silence_reward)
     return report

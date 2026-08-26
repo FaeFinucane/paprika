@@ -69,7 +69,11 @@ class SynapticActivityState:
             factors = np.ones(len(values), dtype=float)
         else:
             factors = np.asarray(weights, dtype=float)
-            if factors.shape != (len(values),) or not np.isfinite(factors).all() or np.any(factors <= 0):
+            if (
+                factors.shape != (len(values),)
+                or not np.isfinite(factors).all()
+                or np.any(factors <= 0)
+            ):
                 raise ValueError("weights must be positive and match observations")
         factors *= decay ** np.arange(len(values) - 1, -1, -1)
         return cls(np.average(np.stack(values), axis=0, weights=factors), float(factors.sum()))
@@ -133,9 +137,7 @@ class SparseSynapses:
         np.add.at(current, self.target[active_edges], self.weight[active_edges])
         return current
 
-    def add_edges(
-        self, source: np.ndarray, target: np.ndarray, weight: np.ndarray
-    ) -> None:
+    def add_edges(self, source: np.ndarray, target: np.ndarray, weight: np.ndarray) -> None:
         """Append connections, useful for explicit sensory projections."""
 
         extra = SparseSynapses(source, target, weight, self.neuron_count)

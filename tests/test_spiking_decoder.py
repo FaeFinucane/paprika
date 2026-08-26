@@ -3,7 +3,6 @@ import pytest
 
 from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
 from continual_agent.cognition.readout import Action
-from continual_agent.cognition.affect_circuit import AffectiveCircuit
 from continual_agent.language.spiking_decoder import SpikingCharacterDecoder
 from continual_agent.simulation.population_layout import Population, PopulationLayout
 
@@ -34,7 +33,9 @@ def test_event_teacher_updates_existing_recurrent_transition_edges() -> None:
     agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
     edges = agent.recurrent_event_edge_indices
     target = agent.layout.subgroup(Population.OUTPUT_CHAR, "a")
-    selected = edges[np.isin(agent.network.synapses.target[edges], np.arange(target.start, target.stop))]
+    selected = edges[
+        np.isin(agent.network.synapses.target[edges], np.arange(target.start, target.stop))
+    ]
     before = agent.network.synapses.weight[selected].copy()
 
     agent.train_response_events(Action.ANSWER, ("m", "a"))
@@ -52,7 +53,7 @@ def test_repeated_event_has_a_recurrent_character_path_without_input_feedback() 
         currents.append(current.copy())
         return original_step(current)
 
-    agent.network.step = step  # type: ignore[method-assign]
+    agent.network.step = step
     m = agent.layout.subgroup(Population.OUTPUT_CHAR, "m")
     m_edges = agent.recurrent_event_edge_indices[
         np.isin(
@@ -69,10 +70,7 @@ def test_repeated_event_has_a_recurrent_character_path_without_input_feedback() 
 
     assert currents
     assert np.any(currents[0][: agent.config.input_features])
-    assert all(
-        not np.any(current[: agent.config.input_features])
-        for current in currents[1:]
-    )
+    assert all(not np.any(current[: agent.config.input_features]) for current in currents[1:])
     assert m_edges.size
     assert np.any(agent.network.synapses.weight[m_edges] != before)
     assert transition_edges.size
@@ -104,7 +102,7 @@ def test_recurrent_state_spans_output_events_without_external_token_input() -> N
             states.append(agent.network.state_snapshot())
         return original_step(current)
 
-    agent.network.step = step  # type: ignore[method-assign]
+    agent.network.step = step
     response = agent.generate_response(Action.ANSWER, max_tokens=3)
 
     assert response.ticks <= 3
@@ -138,7 +136,6 @@ def test_recurrent_state_boundary_follows_session_policy() -> None:
 
 def test_token_projection_requires_matching_named_population() -> None:
     decoder = SpikingCharacterDecoder(alphabet=("a",))
-    layout = PopulationLayout(char_count=decoder.neuron_count)
 
     with pytest.raises(ValueError, match="output_char"):
         decoder.token_projection_indices(PopulationLayout(char_count=decoder.neuron_count + 1))

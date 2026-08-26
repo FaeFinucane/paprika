@@ -16,16 +16,18 @@ The default configuration has 188 neurons:
 
 | Population | Size | Purpose | Implementation |
 | --- | ---: | --- | --- |
-| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled in `src/continual_agent/agent/conversation_agent.py` |
+| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled in `src/continual_agent/agent/spiking_runtime.py` |
 | `HIDDEN` | 48 | Recurrent internal state | `src/continual_agent/simulation/network.py`; layout in `src/continual_agent/simulation/population_layout.py` |
 | `AFFECT` | 7 x 4 = 28 | Neural populations for valence, arousal, uncertainty, curiosity, threat, competence, and social affiliation | `src/continual_agent/cognition/affect_circuit.py` and `src/continual_agent/cognition/affect.py` |
-| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed in `src/continual_agent/agent/conversation_agent.py` |
+| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed in `src/continual_agent/agent/spiking_runtime.py` |
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
-`AgentConfig` controls these dimensions. `ConversationAgent` constructs the
-layout, LIF state, sparse projections, decoder, readouts, affect state, working
-memory, and plasticity object. The layout is consumed by projection helpers,
-readouts, plasticity targeting, and tests rather than duplicated offsets.
+`AgentConfig` controls these dimensions. `SpikingRuntime` constructs the layout,
+LIF state, sparse projections, readout, and plasticity object. The canonical
+`ConversationAgent` facade adds text encoding, affect, working memory, and task
+training without duplicating runtime-owned fields. The layout is consumed by
+projection helpers, readouts, plasticity targeting, and tests rather than
+duplicated offsets.
 
 ## Projections and flow
 
@@ -67,10 +69,14 @@ network is not reset between character events in a response.
   host-side feature context controlled by `persistent_working_memory`; it is
   not a learned language-state population.
 - `src/continual_agent/agent/session.py` implements lifecycle, snapshots,
-  isolation, sparse weight deltas, and explicit merge policies.
+  sparse weight deltas, and explicit merge policies. Runtime isolation is
+  centralized in `SpikingRuntime`; task adapters transfer only their own state.
 - `src/continual_agent/environment/protocol.py` and `scenarios.py` define typed
   actions and curriculum scenarios.
 - `src/continual_agent/agent/debug.py` exposes inspectable response snapshots.
+- `src/continual_agent/agent/config.py`, `response.py`, and `event_training.py`
+  keep configuration, response lifecycle, and event training separate from the
+  public facade.
 
 ## Limitations
 

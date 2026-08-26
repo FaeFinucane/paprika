@@ -1,6 +1,5 @@
 """Experiment metrics."""
 
-from .metrics import TrainingReport, run_curriculum
 from .event_stream import (
     AccountedEvent,
     EventOutcome,
@@ -10,6 +9,7 @@ from .event_stream import (
     TargetEvent,
     evaluate_event_stream,
 )
+from .metrics import TrainingReport, run_curriculum
 
 __all__ = [
     "AccountedEvent",

@@ -5,9 +5,9 @@ import numpy as np
 from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.cognition.affect import AffectiveEvent, AffectiveState
 from continual_agent.cognition.affect_circuit import AffectiveCircuit
-from continual_agent.simulation.synapses import SparseSynapses
 from continual_agent.environment.scenarios import default_scenarios
 from continual_agent.simulation.population_layout import Population, PopulationLayout
+from continual_agent.simulation.synapses import SparseSynapses
 
 
 def test_success_and_threat_move_affect_in_expected_directions() -> None:
@@ -75,12 +75,10 @@ def test_affective_spiking_circuit_aligns_to_targets() -> None:
     affect = layout.slice(Population.AFFECT)
     affect_count = circuit.neuron_count
     source = np.repeat(np.arange(input_count), affect_count)
-    target = np.tile(
-        np.arange(affect.start, affect.stop), input_count
-    )
+    target_indices = np.tile(np.arange(affect.start, affect.stop), input_count)
     synapses = SparseSynapses(
         source=source,
-        target=target,
+        target=target_indices,
         weight=np.zeros(source.size),
         neuron_count=layout.total_count,
     )
@@ -88,10 +86,10 @@ def test_affective_spiking_circuit_aligns_to_targets() -> None:
     features = np.zeros(8)
     features[2] = 1.0
     before = circuit.projection_prediction(synapses, edge_indices, features)
-    target = AffectiveState(threat=1.0, arousal=1.0)
+    target_state = AffectiveState(threat=1.0, arousal=1.0)
 
     for _ in range(80):
-        circuit.align(synapses, edge_indices, features, target)
+        circuit.align(synapses, edge_indices, features, target_state)
 
     after = circuit.projection_prediction(synapses, edge_indices, features)
     assert after["threat"] > before["threat"]

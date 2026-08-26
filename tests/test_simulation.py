@@ -14,9 +14,7 @@ def test_lif_neuron_spikes_and_resets() -> None:
 
 
 def test_lif_refractory_period_suppresses_spikes() -> None:
-    neurons = LIFNeurons(
-        count=1, dt=1.0, tau_membrane=1.0, threshold=1.0, refractory_ticks=2
-    )
+    neurons = LIFNeurons(count=1, dt=1.0, tau_membrane=1.0, threshold=1.0, refractory_ticks=2)
 
     spikes = [bool(neurons.step(np.array([2.0]))[0]) for _ in range(5)]
 

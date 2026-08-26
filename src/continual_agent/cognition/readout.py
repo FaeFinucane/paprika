@@ -108,7 +108,11 @@ class OutputArbitrationPolicy:
             else:
                 priority = self.character_priority
             # Lower subgroup order is stable and wins a complete tie.
-            return (candidate.evidence, priority, -candidate.order,)
+            return (
+                candidate.evidence,
+                priority,
+                -candidate.order,
+            )
 
         selected = max(candidates, key=rank)
         return ArbitrationDecision(selected, candidates, "selected")
@@ -195,9 +199,11 @@ class EventReadout:
                 self.arbitrations.append(self.last_arbitration)
                 return None
             self.active_output = None
-        selected = tuple(populations) if populations is not None else tuple(self._groups)
+        selected_populations = (
+            tuple(populations) if populations is not None else tuple(self._groups)
+        )
         candidates: list[OutputCandidate] = []
-        for population in selected:
+        for population in selected_populations:
             for order, (name, group) in enumerate(self._groups.get(population, {}).items()):
                 evidence = float(values[group].sum())
                 if evidence >= self.activation_threshold:
@@ -224,8 +230,10 @@ class EventReadout:
             self.stopped = True
         return event
 
+
 class ActionReadout:
     """Expose named action population bounds for neural training/debugging."""
+
     def __init__(
         self,
         actions: tuple[Action, ...] = tuple(Action),

@@ -14,6 +14,7 @@ import numpy as np
 
 from continual_agent.agent.session import InputSignal
 
+
 @dataclass(frozen=True)
 class InputEvent:
     """One control or semantic input event in a presentation."""
@@ -109,8 +110,6 @@ class TextEncoder:
         ticks = config.presentation_speed
         events: list[InputEvent] = [InputEvent(signal=InputSignal.INPUT_BEGIN)]
         for frame in semantic_frames:
-            events.extend(
-                InputEvent(frame=np.array(frame, copy=True)) for _ in range(ticks)
-            )
+            events.extend(InputEvent(frame=np.array(frame, copy=True)) for _ in range(ticks))
         events.append(InputEvent(signal=InputSignal.INPUT_END))
         return tuple(events)

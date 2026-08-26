@@ -5,9 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from continual_agent.cognition.affect import AffectiveState
-from continual_agent.simulation.synapses import SparseSynapses
 from continual_agent.simulation.population_layout import Population, PopulationLayout
-
+from continual_agent.simulation.synapses import SparseSynapses
 
 AFFECT_SIGNALS = (
     "valence",
@@ -52,9 +51,7 @@ class AffectiveCircuit:
             for name in self.signal_names
         }
 
-    def projection_indices(
-        self, layout: PopulationLayout
-    ) -> np.ndarray:
+    def projection_indices(self, layout: PopulationLayout) -> np.ndarray:
         """Return ``[signal, input_feature, neuron_in_population]`` edge IDs."""
 
         bounds = layout.slice(Population.AFFECT)
@@ -91,9 +88,7 @@ class AffectiveCircuit:
         probabilities = 1.0 / (1.0 + np.exp(-(weights @ features)))
         values = probabilities.copy()
         values[0] = 2.0 * values[0] - 1.0
-        return {
-            name: float(value) for name, value in zip(self.signal_names, values)
-        }
+        return {name: float(value) for name, value in zip(self.signal_names, values)}
 
     def align(
         self,
@@ -110,13 +105,9 @@ class AffectiveCircuit:
         error = self._targets(state) - probabilities
         update = self.learning_rate * error[:, None] * features[None, :]
         synapses.weight[edge_indices] += update[:, :, None] / self.neurons_per_signal
-        synapses.weight[edge_indices] = np.clip(
-            synapses.weight[edge_indices], -1.0, 1.0
-        )
+        synapses.weight[edge_indices] = np.clip(synapses.weight[edge_indices], -1.0, 1.0)
 
-    def decode(
-        self, spike_frames: list[np.ndarray], layout: PopulationLayout
-    ) -> dict[str, float]:
+    def decode(self, spike_frames: list[np.ndarray], layout: PopulationLayout) -> dict[str, float]:
         if not spike_frames:
             return {name: 0.0 for name in self.signal_names}
         groups = self.groups(layout)
@@ -129,6 +120,4 @@ class AffectiveCircuit:
         )
         values = np.clip(rates, 0.0, 1.0)
         values[0] = 2.0 * values[0] - 1.0
-        return {
-            name: float(value) for name, value in zip(self.signal_names, values)
-        }
+        return {name: float(value) for name, value in zip(self.signal_names, values)}

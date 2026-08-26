@@ -15,6 +15,10 @@ python3 -m venv .venv
 
 ```bash
 .venv/bin/pytest -q
+.venv/bin/ruff check .
+.venv/bin/ruff format --check .
+.venv/bin/mypy
+.venv/bin/python -m continual_agent.experiments.synthetic_temporal
 ```
 
 ## Run the automated curriculum
@@ -41,3 +45,8 @@ spiking output populations and timestamped event-readout path.
 - [Tasks](docs/TASKS.md) — deferred and actionable work.
 - [Affective state reference](docs/AFFECTIVE_STATE_SPEC.md) — bounded affective
   state and its current guarantees.
+- [Synthetic temporal experiments](docs/experiments/SYNTHETIC_TEMPORAL.md) — small
+  immediate/delayed copy and pathway-control harness.
+
+The commands above are the standard local verification set. The synthetic
+experiment is the canonical architecture viability entry point.

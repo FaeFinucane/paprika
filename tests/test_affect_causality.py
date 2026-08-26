@@ -16,16 +16,16 @@ def test_affect_to_action_pathway_is_causally_ablatable() -> None:
     agent.respond("Can you help me choose?")
     with_pathway = np.asarray(agent.network.spike_history)
     output = agent.layout.slice(Population.OUTPUT_ACTION)
-    with_output_voltage = agent.network.neurons.voltage[output.start:].copy()
+    with_output_voltage = agent.network.neurons.voltage[output.start :].copy()
 
     agent.network.synapses.weight[edges] = 0.0
     agent.respond("Can you help me choose?")
     without_pathway = np.asarray(agent.network.spike_history)
-    without_output_voltage = agent.network.neurons.voltage[output.start:].copy()
+    without_output_voltage = agent.network.neurons.voltage[output.start :].copy()
 
     agent.network.synapses.weight[edges] = original
-    assert with_pathway[:, output.start:].sum() > 0
-    assert without_pathway[:, output.start:].sum() > 0
+    assert with_pathway[:, output.start :].sum() > 0
+    assert without_pathway[:, output.start :].sum() > 0
     assert not np.array_equal(with_output_voltage, without_output_voltage)
 
 

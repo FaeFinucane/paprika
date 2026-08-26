@@ -1,11 +1,12 @@
 import numpy as np
 import pytest
 
-from continual_agent.cognition.readout import OutputEvent
 from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
+from continual_agent.cognition.readout import OutputEvent
 from continual_agent.evaluation.event_stream import (
     EventOutcome,
     EventStreamConfig,
+    EventStreamReport,
     SilenceInterval,
     TargetEvent,
     evaluate_event_stream,
@@ -17,7 +18,7 @@ def event(name: str, timestamp: int) -> OutputEvent:
     return OutputEvent(Population.OUTPUT_CHAR, name, timestamp, 1.0)
 
 
-def outcomes(report):
+def outcomes(report: EventStreamReport) -> list[EventOutcome]:
     return [record.outcome for record in report.records]
 
 
@@ -32,8 +33,10 @@ def test_correct_and_incorrect_events_are_accounted_independently() -> None:
 
 def test_missing_output_is_only_declared_after_patience() -> None:
     report = evaluate_event_stream(
-        (TargetEvent("m", 0),), (),
-        config=EventStreamConfig(patience_window=2), end_time=2,
+        (TargetEvent("m", 0),),
+        (),
+        config=EventStreamConfig(patience_window=2),
+        end_time=2,
     )
     assert outcomes(report) == [EventOutcome.MISSING_OUTPUT, EventOutcome.VALID_SILENCE]
     assert report.total_reward == -1.0
@@ -59,6 +62,18 @@ def test_eos_accounting_distinguishes_premature_missing_and_post_eos() -> None:
     assert missing.counts[EventOutcome.MISSING_EOS] == 1
     assert post.counts[EventOutcome.POST_EOS_OUTPUT] == 1
     assert post.eos_accuracy
+
+
+def test_withheld_prefix_allows_eos_after_unavailable_outputs() -> None:
+    report = evaluate_event_stream(
+        ("m", "a", "<EOS>"),
+        (event("<EOS>", 0),),
+        withheld_prefix=2,
+    )
+
+    assert report.counts[EventOutcome.MISSING_OUTPUT] == 2
+    assert report.counts[EventOutcome.PREMATURE_EOS] == 0
+    assert report.eos_accuracy
 
 
 def test_early_timing_is_open_by_default_but_can_be_configured() -> None:
@@ -104,7 +119,9 @@ def test_event_reward_outcomes_remain_distinct_in_the_consumed_ledger() -> None:
         evaluate_event_stream(("m",), (event("m", 0),), config=config),
         evaluate_event_stream(("m",), (event("b", 0),), config=config),
         evaluate_event_stream(("m",), (), config=config, end_time=2),
-        evaluate_event_stream(("m",), (event("b", 0),), silence_intervals=(SilenceInterval(0, 0),), config=config),
+        evaluate_event_stream(
+            ("m",), (event("b", 0),), silence_intervals=(SilenceInterval(0, 0),), config=config
+        ),
         evaluate_event_stream(("m", "<EOS>"), (event("<EOS>", 0),), config=config),
         evaluate_event_stream(("m", "<EOS>"), (event("m", 0),), config=config, end_time=8),
     )

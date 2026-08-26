@@ -97,13 +97,16 @@ working memory, and weights. It returns the callback result and validated sparse
 uses the selected conflict policy. This supports separate training sessions
 without mutating shared runtime state accidentally.
 
-Implemented in `src/continual_agent/agent/conversation_agent.py` and
-`src/continual_agent/agent/session.py`.
+Implemented by `SpikingRuntime.clone_state()` and
+`SpikingRuntime.execute_isolated()` in `src/continual_agent/agent/spiking_runtime.py`;
+`ConversationAgent` supplies only task-state transfer hooks.
 
 ## Current boundary
 
-The canonical character training operation is an ordered event stream ending in
-EOS. It validates and adjusts recurrent transitions, but it is only an initial
-baseline. The repository does not currently establish robust general sequence
-memory or full sequence learning. The automated curriculum entry point is
+Raw-frame training is an explicit session: exactly one `INPUT_BEGIN` and
+`INPUT_END` are required, every frame must be inside that window, and cleanup
+resets traces, neural state, readout state, and the training lifecycle even when
+the iterator or validation fails. The canonical character training operation
+is an ordered event stream ending in EOS and remains a recurrent-state baseline,
+not a general sequence-memory claim. The automated curriculum entry point is
 `src/continual_agent/experiments/run_conversation.py`.

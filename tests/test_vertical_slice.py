@@ -2,8 +2,6 @@ import numpy as np
 import pytest
 
 from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
-from continual_agent.cognition.readout import Action
-from continual_agent.cognition.working_memory import WorkingMemory
 from continual_agent.agent.session import (
     ConflictPolicy,
     InputSignal,
@@ -12,6 +10,8 @@ from continual_agent.agent.session import (
     SessionSnapshot,
     SessionStateError,
 )
+from continual_agent.cognition.readout import Action
+from continual_agent.cognition.working_memory import WorkingMemory
 from continual_agent.encoding.text_encoder import TextEncoder
 from continual_agent.environment.scenarios import default_scenarios
 from continual_agent.plasticity.stdp import RewardModulatedSTDP
@@ -158,12 +158,8 @@ def test_isolated_sessions_do_not_share_execution_state_and_merge_explicitly() -
     before_weights = agent.network.synapses.weight.copy()
     before_voltage = agent.network.neurons.voltage.copy()
 
-    first, first_execution = agent.train_response_isolated(
-        "hello", Action.ANSWER, merge=False
-    )
-    second, second_execution = agent.train_response_isolated(
-        "hello", Action.REVISE, merge=False
-    )
+    first, first_execution = agent.train_response_isolated("hello", Action.ANSWER, merge=False)
+    second, second_execution = agent.train_response_isolated("hello", Action.REVISE, merge=False)
 
     assert first.action in tuple(Action)
     assert second.action in tuple(Action)

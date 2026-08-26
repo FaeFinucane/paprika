@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from continual_agent.cognition.readout import Action
 from continual_agent.cognition.affect import AffectiveEvent
+from continual_agent.cognition.readout import Action
 
 
 @dataclass(frozen=True)

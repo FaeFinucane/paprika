@@ -17,14 +17,37 @@ def make_layout() -> PopulationLayout:
     action_start = affect_start + affect_count
     char_start = action_start + action_count
     return PopulationLayout(
-        input_count=input_count, hidden_count=hidden_count,
-        affect_count=affect_count, action_count=action_count, char_count=char_count,
-        affect_subgroups={name: slice(affect_start + i * 4, affect_start + (i + 1) * 4)
-                          for i, name in enumerate(("valence", "arousal", "uncertainty", "curiosity", "threat", "competence", "social_affiliation"))},
-        action_subgroups={name: slice(action_start + i * 4, action_start + (i + 1) * 4)
-                         for i, name in enumerate(("answer", "clarify", "acknowledge", "uncertain", "revise", "refuse", "wait"))},
-        char_subgroups={name: slice(char_start + i * 3, char_start + (i + 1) * 3)
-                       for i, name in enumerate(("<EOS>", "m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!"))},
+        input_count=input_count,
+        hidden_count=hidden_count,
+        affect_count=affect_count,
+        action_count=action_count,
+        char_count=char_count,
+        affect_subgroups={
+            name: slice(affect_start + i * 4, affect_start + (i + 1) * 4)
+            for i, name in enumerate(
+                (
+                    "valence",
+                    "arousal",
+                    "uncertainty",
+                    "curiosity",
+                    "threat",
+                    "competence",
+                    "social_affiliation",
+                )
+            )
+        },
+        action_subgroups={
+            name: slice(action_start + i * 4, action_start + (i + 1) * 4)
+            for i, name in enumerate(
+                ("answer", "clarify", "acknowledge", "uncertain", "revise", "refuse", "wait")
+            )
+        },
+        char_subgroups={
+            name: slice(char_start + i * 3, char_start + (i + 1) * 3)
+            for i, name in enumerate(
+                ("<EOS>", "m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!")
+            )
+        },
     )
 
 
@@ -39,9 +62,7 @@ def test_action_readout_only_exposes_named_layout_groups() -> None:
     groups = readout.groups(current)
 
     assert groups[Action.ANSWER].tolist() == list(
-        range(*current.subgroup(Population.OUTPUT_ACTION, "answer").indices(
-            current.total_count
-        ))
+        range(*current.subgroup(Population.OUTPUT_ACTION, "answer").indices(current.total_count))
     )
     assert not hasattr(readout, "policy_weights")
 

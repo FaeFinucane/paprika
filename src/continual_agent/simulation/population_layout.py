@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
@@ -32,10 +33,17 @@ class PopulationLayout:
     _total_count: int = 0
 
     def __post_init__(self) -> None:
-        counts = (self.input_count, self.hidden_count, self.affect_count,
-                  self.action_count, self.char_count)
-        if any(not isinstance(count, int) or isinstance(count, bool) or count <= 0 for count in counts):
-            raise ValueError("population counts must be positive integers")
+        counts = (
+            self.input_count,
+            self.hidden_count,
+            self.affect_count,
+            self.action_count,
+            self.char_count,
+        )
+        if any(
+            not isinstance(count, int) or isinstance(count, bool) or count < 0 for count in counts
+        ):
+            raise ValueError("population counts must be non-negative integers")
         current = self.input_count + self.hidden_count
         slices = {
             Population.INPUT: slice(0, self.input_count),
@@ -58,9 +66,17 @@ class PopulationLayout:
             normalized = dict(groups)
             bounds = self._slices[population]
             for key, subgroup in normalized.items():
-                if subgroup.step not in (None, 1) or subgroup.start is None or subgroup.stop is None:
+                if (
+                    subgroup.step not in (None, 1)
+                    or subgroup.start is None
+                    or subgroup.stop is None
+                ):
                     raise ValueError(f"{name} must contain contiguous slices")
-                if subgroup.start < bounds.start or subgroup.stop > bounds.stop or subgroup.start >= subgroup.stop:
+                if (
+                    subgroup.start < bounds.start
+                    or subgroup.stop > bounds.stop
+                    or subgroup.start >= subgroup.stop
+                ):
                     raise ValueError(f"{name} contains an out-of-bounds slice")
             object.__setattr__(self, name, MappingProxyType(normalized))
 
@@ -68,10 +84,10 @@ class PopulationLayout:
     def total_count(self) -> int:
         return self._total_count
 
-    def slice(self, population: Population) -> slice:
+    def slice(self, population: Population) -> builtins.slice:
         return self._slices[population]
 
-    def subgroup(self, population: Population, name: str) -> slice:
+    def subgroup(self, population: Population, name: str) -> builtins.slice:
         groups = {
             Population.AFFECT: self.affect_subgroups,
             Population.OUTPUT_ACTION: self.action_subgroups,

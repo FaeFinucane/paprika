@@ -7,9 +7,9 @@ previous session's mutable arrays as the next session's baseline.
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
-from copy import deepcopy
 
 import numpy as np
 
@@ -86,9 +86,7 @@ class SessionSnapshot:
         self.neuron_voltage = np.array(self.neuron_voltage, dtype=float, copy=True)
         self.neuron_refractory = np.array(self.neuron_refractory, dtype=np.int64, copy=True)
         self.synaptic_activity = np.array(self.synaptic_activity, dtype=float, copy=True)
-        self.plasticity_eligibility = np.array(
-            self.plasticity_eligibility, dtype=float, copy=True
-        )
+        self.plasticity_eligibility = np.array(self.plasticity_eligibility, dtype=float, copy=True)
         if self.neuron_voltage.shape != self.neuron_refractory.shape:
             raise ValueError("neuron voltage and refractory state must have equal shapes")
 
@@ -210,14 +208,8 @@ class SessionExecutionSnapshot:
         if policy is ConflictPolicy.REJECT:
             # Preflight the complete batch so rejection is atomic.
             for update in self._updates:
-                if np.any(
-                    ~np.isclose(
-                        shared[update.indices], update.base, rtol=0.0, atol=0.0
-                    )
-                ):
-                    raise WeightConflictError(
-                        "shared weights changed under a session update"
-                    )
+                if np.any(~np.isclose(shared[update.indices], update.base, rtol=0.0, atol=0.0)):
+                    raise WeightConflictError("shared weights changed under a session update")
         for update in self._updates:
             current = shared[update.indices]
             proposed = update.base + update.delta
@@ -298,9 +290,7 @@ class ResponseSession:
             SessionState.COMPLETE,
             SessionState.EXHAUSTED,
         ):
-            raise SessionStateError(
-                f"cannot reset for next response from {self.state.value}"
-            )
+            raise SessionStateError(f"cannot reset for next response from {self.state.value}")
         self._snapshot = snapshot.copy() if snapshot is not None else self._snapshot
         self.input_active = False
         self.state = SessionState.IDLE
