@@ -22,10 +22,64 @@ cleanup decisions are intentionally not listed as active tasks.
   repeated characters, valid silence, premature EOS, missing EOS, and post-EOS
   suppression.
 
+## First viability experiments
+
+- Add a dedicated synthetic temporal-event experiment with a tiny alphabet and
+  controlled input frames, rather than English text. Keep the input encoding
+  identical between conditions and train fresh agents for each condition.
+- Run an **immediate-copy** condition: the network may emit each symbol once it
+  becomes available. Evaluate ordered events, repeated symbols, silence, and
+  EOS without requiring exact timestamps.
+- Run a separate **delayed-copy** condition: present the complete sequence,
+  emit `INPUT_END`, then allow the network a generous patience window to emit
+  the copied sequence and EOS. This tests recurrent retention after input ends.
+- Do not train both conditions into one agent: identical inputs with different
+  timing expectations would be ambiguous without an explicit task-mode signal.
+- Use untrained, no-learning, shuffled-target, recurrent-ablation, and
+  direct-input-to-output-ablation controls. Record event correctness, missing
+  and unwanted events, EOS behavior, latency, hidden activity, and weight
+  changes. Treat timing as a measured property, not an early hard target.
+- Interpret immediate-copy success with delayed-copy failure as evidence that
+  basic pathways work but recurrent retention is inadequate. Delayed-copy
+  success is evidence for useful internal temporal state, not evidence of
+  language understanding.
+
+### Experiment directory cleanup
+
+- Add a dedicated synthetic temporal-event experiment with its own controlled
+  input generation, evaluation, and result reporting; it should not resurrect
+  the superseded reduced-language curriculum.
+- Retain `experiments/run_conversation.py` only as an explicitly named typed
+  action baseline. If it is not an active comparison, remove it too rather
+  than keeping an undocumented second experiment path.
+- The new synthetic experiment should be the only canonical architecture
+  viability entry point and should own its input generation, evaluation, and
+  result reporting.
+
 ## Scaling
 
 - Increase network size only after event-stream behavior and activity/capacity
   measurements demonstrate a genuine bottleneck.
+
+## Codebase structure and quality
+
+- Split `src/continual_agent/agent/conversation_agent.py` into cohesive modules
+  before it grows further. Keep orchestration thin and move configuration,
+  response lifecycle, input handling, output generation, and training/reward
+  responsibilities behind focused interfaces. Aim for a soft maximum of 300
+  lines per source file; deviations should be documented by necessity rather
+  than enforced through arbitrary fragmentation.
+- Establish automated code-quality rules in the development toolchain. At
+  minimum, use established tools rather than inventing a project-specific
+  linter: Ruff for formatting/import/lint checks and a type checker such as
+  mypy or pyright where practical. A small repository-specific check is
+  appropriate only for the genuinely local architectural rule about source
+  files exceeding the agreed size limit. Run the standard tools alongside
+  pytest in the standard verification command or CI entry point.
+- Define which rules are architectural requirements versus style preferences,
+  configure them in `pyproject.toml`, and add tests/checks for public API
+  boundaries such as population-only addressing and the canonical event-output
+  path.
 
 ## Safety and resources
 

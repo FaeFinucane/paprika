@@ -63,7 +63,7 @@ class TextEncoder:
             symbols.append("<empty>")
         else:
             # Preserve a high-level identity feature as well as local n-grams.
-            # This keeps the tiny first curriculum separable without requiring
+            # This keeps tiny initial experiments separable without requiring
             # a learned tokenizer.
             symbols.append(f"<message:{normalised}>")
 
