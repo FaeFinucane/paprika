@@ -12,7 +12,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from continual_agent.agent.session import InputSignal
+from continual_agent.agent.session import (
+    BOUNDARY_CHANNEL_COUNT,
+    InputSignal,
+)
 
 
 @dataclass(frozen=True)
@@ -44,6 +47,8 @@ class TextEncoder:
     ):
         if feature_count <= 0:
             raise ValueError("feature_count must be positive")
+        if feature_count <= BOUNDARY_CHANNEL_COUNT:
+            raise ValueError("feature_count must leave room for boundary channels")
         if ticks_per_token <= 0:
             raise ValueError("ticks_per_token must be positive")
         self.feature_count = feature_count
@@ -53,7 +58,9 @@ class TextEncoder:
 
     def _feature(self, text: str) -> int:
         digest = hashlib.blake2b(text.encode("utf-8"), digest_size=8).digest()
-        return int.from_bytes(digest, "little") % self.feature_count
+        return BOUNDARY_CHANNEL_COUNT + (
+            int.from_bytes(digest, "little") % (self.feature_count - BOUNDARY_CHANNEL_COUNT)
+        )
 
     def encode(self, text: str, turn_marker: str = "USER_TURN") -> np.ndarray:
         """Return ``[ticks, feature_count]`` current frames."""

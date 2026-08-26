@@ -53,6 +53,13 @@ class InputSignal(str, Enum):
     INPUT_END = "input_end"
 
 
+# These input dimensions are protocol channels, not text features.  Keeping the
+# reservation here gives encoders and runtimes one source of truth.
+INPUT_BEGIN_CHANNEL = 0
+INPUT_END_CHANNEL = 1
+BOUNDARY_CHANNEL_COUNT = 2
+
+
 @dataclass(frozen=True)
 class SessionPolicy:
     """Reset/persistence decisions at a response boundary.

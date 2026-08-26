@@ -8,13 +8,35 @@ cleanup decisions are intentionally not listed as active tasks.
 - Add and evaluate a separate `OUTPUT_FEEDBACK` channel only after the event
   protocol has stable coverage. It must not reuse external `INPUT` or become a
   second decision-maker.
+- When output feedback is revisited, consider it as self-generated sensory
+  reafference rather than automatic token autoregression: an emitted event may
+  produce a separate internal sensory signal that can contribute to prediction
+  error and affective modulation.
 - Add an `OUTPUT_GATE` only as a post-selection emission control; it must not
   choose an action or character.
 
 ## Learning and stability
 
-- Add configurable plasticity schedules, adaptive thresholds, and other
-  homeostatic stabilisation before considering structural rewiring.
+- Completed: the shared runtime has seeded, vectorized low-rate background drive;
+  normal output projections remain present and only explicit ablations zero edges.
+  Runtime and synthetic results expose hidden/output activity, event rate, and
+  eligibility/weight changes by pathway.
+- Completed: synthetic STDP uses actual immediate and causal delayed outputs,
+  preserves eligibility until the scalar event reward, and has an explicit early
+  versus reliable asymmetric reward schedule. Penalties remain event-level and
+  are not output-volume scaled.
+- Completed: `SpikingRuntime.population_diagnostics` reports per-population rate
+  mean/spread, active/silent/saturated fractions, voltage and threshold
+  distributions, and output event rate. `pathway_diagnostics` reports weight
+  and eligibility norms for direct, hidden, and recurrent output pathways.
+- Completed: optional slow population homeostasis adds one bounded shared current
+  per configured population. It targets a population mean rate, is disabled by
+  default, and does not adapt individual neurons, thresholds, output feedback,
+  gates, timer neurons, or STDP weights.
+- Future research only: investigate whether heterogeneous intrinsic oscillatory
+  or pacemaker-like activity is useful for temporal coordination. Do not add
+  timer neurons or timer-driven activity to the current baseline experiments;
+  begin with stochastic background drive instead.
 - Measure recurrent-state persistence and capacity, and decide whether a
   dedicated learned context population is justified. Do not infer this from
   longer examples alone.
@@ -22,39 +44,9 @@ cleanup decisions are intentionally not listed as active tasks.
   repeated characters, valid silence, premature EOS, missing EOS, and post-EOS
   suppression.
 
-## First viability experiments
-
-- Add a dedicated synthetic temporal-event experiment with a tiny alphabet and
-  controlled input frames, rather than English text. Keep the input encoding
-  identical between conditions and train fresh agents for each condition.
-- Run an **immediate-copy** condition: the network may emit each symbol once it
-  becomes available. Evaluate ordered events, repeated symbols, silence, and
-  EOS without requiring exact timestamps.
-- Run a separate **delayed-copy** condition: present the complete sequence,
-  emit `INPUT_END`, then allow the network a generous patience window to emit
-  the copied sequence and EOS. This tests recurrent retention after input ends.
-- Do not train both conditions into one agent: identical inputs with different
-  timing expectations would be ambiguous without an explicit task-mode signal.
-- Use untrained, no-learning, shuffled-target, recurrent-ablation, and
-  direct-input-to-output-ablation controls. Record event correctness, missing
-  and unwanted events, EOS behavior, latency, hidden activity, and weight
-  changes. Treat timing as a measured property, not an early hard target.
-- Interpret immediate-copy success with delayed-copy failure as evidence that
-  basic pathways work but recurrent retention is inadequate. Delayed-copy
-  success is evidence for useful internal temporal state, not evidence of
-  language understanding.
-
-### Experiment directory cleanup
-
-- Add a dedicated synthetic temporal-event experiment with its own controlled
-  input generation, evaluation, and result reporting; it should not resurrect
-  the superseded reduced-language curriculum.
 - Retain `experiments/run_conversation.py` only as an explicitly named typed
   action baseline. If it is not an active comparison, remove it too rather
   than keeping an undocumented second experiment path.
-- The new synthetic experiment should be the only canonical architecture
-  viability entry point and should own its input generation, evaluation, and
-  result reporting.
 
 ## Scaling
 

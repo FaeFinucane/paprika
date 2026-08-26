@@ -31,8 +31,11 @@ duplicated offsets.
 
 ## Projections and flow
 
-- Text is converted to bounded rate-coded frames. `INPUT_BEGIN` and `INPUT_END`
-  delimit presentation in `TextEncoder.present()`.
+- Text is converted to bounded rate-coded frames. Input dimensions 0 and 1 are
+  reserved for neural `INPUT_BEGIN` and `INPUT_END` currents; text hashing uses
+  only the remaining dimensions. Each boundary advances the network, rather
+  than being only a `ResponseSession` check. `INPUT_END` is the first observable
+  response tick in delayed mode, while semantic input output remains withheld.
 - Input projects directly to action and affect populations. Affective
   populations project to action populations through ordinary recurrent synapses;
   there is no host-side affect-to-action arithmetic.
@@ -74,6 +77,11 @@ network is not reset between character events in a response.
 - `src/continual_agent/environment/protocol.py` and `scenarios.py` define typed
   actions and curriculum scenarios.
 - `src/continual_agent/agent/debug.py` exposes inspectable response snapshots.
+- `runtime_metrics.py` accumulates windowed population diagnostics. Active means
+  at least one spike in the window, silent means zero spikes, and saturated means
+  a per-neuron rate at or above the configured saturation rate (0.5 by default).
+  `population_homeostasis.py` optionally applies a slow, bounded shared current
+  from population mean-rate error; it never drives neurons toward identical rates.
 - `src/continual_agent/agent/config.py`, `response.py`, and `event_training.py`
   keep configuration, response lifecycle, and event training separate from the
   public facade.
@@ -83,7 +91,9 @@ network is not reset between character events in a response.
 There is no dedicated learned context population, output feedback channel, or
 output gate. Action selection comes from `OUTPUT_ACTION` through
 `EventReadout`, not from a parallel host policy. Advanced plasticity schedules,
-structural rewiring, adaptive thresholds, and network scaling are deferred.
+structural rewiring, individual adaptive thresholds, and network scaling are
+deferred. Homeostasis is opt-in and population-level only, so its defaults do
+not alter existing behavior.
 
 The character path supports teacher-presented ordered events through existing
 recurrence, including EOS, but this should not be described as full sequence

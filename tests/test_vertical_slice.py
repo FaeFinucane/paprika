@@ -10,12 +10,88 @@ from continual_agent.agent.session import (
     SessionSnapshot,
     SessionStateError,
 )
+from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.cognition.readout import Action
 from continual_agent.cognition.working_memory import WorkingMemory
 from continual_agent.encoding.text_encoder import TextEncoder
 from continual_agent.environment.scenarios import default_scenarios
 from continual_agent.plasticity.stdp import RewardModulatedSTDP
+from continual_agent.simulation.population_layout import Population
 from continual_agent.simulation.synapses import SparseSynapses
+
+
+def test_runtime_boundaries_drive_distinct_input_channels() -> None:
+    runtime = SpikingRuntime(
+        input_features=4,
+        hidden_neurons=4,
+        output_tokens=("<EOS>", "A"),
+        neurons_per_token=1,
+        seed=2,
+    )
+    runtime.start_session()
+    begin = runtime.step_input_signal(InputSignal.INPUT_BEGIN)
+    assert begin[0]
+    assert runtime.network.neurons.voltage[0] == 0.0
+    end = runtime.step_input_signal(InputSignal.INPUT_END)
+    assert end[1]
+    assert not np.array_equal(begin, end)
+
+
+def test_background_drive_is_seeded_and_vectorized() -> None:
+    first = SpikingRuntime(
+        input_features=4,
+        hidden_neurons=4,
+        output_tokens=("<EOS>", "A"),
+        neurons_per_token=1,
+        seed=21,
+        background_rate=0.5,
+        background_current=0.4,
+    )
+    second = SpikingRuntime(
+        input_features=4,
+        hidden_neurons=4,
+        output_tokens=("<EOS>", "A"),
+        neurons_per_token=1,
+        seed=21,
+        background_rate=0.5,
+        background_current=0.4,
+    )
+    current = np.zeros(first.neurons.count)
+    first_spikes = [first.step(current) for _ in range(8)]
+    second_spikes = [second.step(current) for _ in range(8)]
+    np.testing.assert_array_equal(first_spikes, second_spikes)
+    assert first.diagnostics["firing_rate"] >= 0.0
+
+
+def test_normal_output_pathways_are_not_zeroed() -> None:
+    runtime = SpikingRuntime(
+        input_features=4,
+        hidden_neurons=4,
+        output_tokens=("<EOS>", "A"),
+        neurons_per_token=1,
+        seed=22,
+    )
+    output = runtime.layout.slice(Population.OUTPUT_CHAR)
+    incoming = (runtime.synapses.target >= output.start) & (runtime.synapses.target < output.stop)
+    assert np.all(runtime.synapses.weight[incoming] != 0.0)
+
+
+def test_boundary_current_is_neural_and_not_a_semantic_feature() -> None:
+    runtime = SpikingRuntime(
+        input_features=4,
+        hidden_neurons=4,
+        output_tokens=("<EOS>", "A"),
+        neurons_per_token=1,
+        seed=9,
+    )
+    runtime.start_session()
+    boundary = runtime.boundary_current(InputSignal.INPUT_END)
+    assert boundary[1]
+    assert not boundary[0]
+    assert runtime.network.tick == 0
+    emitted = runtime.step_input_signal(InputSignal.INPUT_BEGIN)
+    assert runtime.network.tick == 1
+    assert np.any(emitted)
 
 
 def test_text_encoding_is_deterministic_and_sparse() -> None:
@@ -39,6 +115,11 @@ def test_input_presentation_has_boundaries_and_preserves_semantic_activity() -> 
     frames = np.asarray([event.frame for event in events[1:-1]])
     np.testing.assert_array_equal(frames[0], encoded[0])
     assert len(frames) == len(encoded) * 2
+
+
+def test_text_hashing_never_uses_boundary_channels() -> None:
+    encoded = TextEncoder(8).encode("boundary")
+    assert not np.any(encoded[:, :2])
 
 
 def test_rate_presentation_holds_each_frame_for_configured_speed() -> None:

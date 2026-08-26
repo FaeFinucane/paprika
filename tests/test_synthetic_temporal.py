@@ -1,3 +1,5 @@
+from unittest.mock import Mock, patch
+
 import numpy as np
 import pytest
 
@@ -11,6 +13,8 @@ from continual_agent.experiments.synthetic_temporal import (
     TemporalExperimentConfig,
     TrainingMode,
     _make_runtime,
+    _stream,
+    main,
     run_temporal_experiment,
 )
 from continual_agent.simulation.population_layout import Population
@@ -45,6 +49,61 @@ def test_experiment_uses_separate_conditions_and_controls() -> None:
     assert all(trial.weight_change == 0 for trial in no_learning)
 
 
+def test_summary_has_stable_condition_agent_control_order() -> None:
+    result = run_temporal_experiment(
+        small_config(),
+        conditions=(CopyCondition.DELAYED, CopyCondition.IMMEDIATE),
+        controls=(Control.NO_LEARNING, Control.TRAINED),
+        agents=(AgentKind.REWARD_MODULATED_STDP, AgentKind.SUPERVISED),
+    )
+
+    assert list(result.summary()) == [
+        ("immediate-copy", "supervised-structural", "trained"),
+        ("immediate-copy", "supervised-structural", "no-learning"),
+        ("immediate-copy", "reward-modulated-stdp", "trained"),
+        ("immediate-copy", "reward-modulated-stdp", "no-learning"),
+        ("delayed-copy", "supervised-structural", "trained"),
+        ("delayed-copy", "supervised-structural", "no-learning"),
+        ("delayed-copy", "reward-modulated-stdp", "trained"),
+        ("delayed-copy", "reward-modulated-stdp", "no-learning"),
+    ]
+
+
+def test_main_default_is_compact_and_verbose_includes_all_rows(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    summary = {
+        (condition.value, agent.value, control.value): {
+            "event_recall": 0.5,
+            "eos_accuracy": 1.0,
+        }
+        for condition in CopyCondition
+        for agent in AgentKind
+        for control in Control
+    }
+    result = Mock()
+    result.summary.return_value = summary
+    with patch(
+        "continual_agent.experiments.synthetic_temporal.run_paired_temporal_experiment",
+        return_value=result,
+    ):
+        main([])
+    default_output = capsys.readouterr().out
+    assert "Trained comparison" in default_output
+    assert "Immediate" in default_output and "Delayed" in default_output
+    assert default_output.count("/ supervised structural /") == 0
+    assert len(default_output.splitlines()) == 10
+
+    with patch(
+        "continual_agent.experiments.synthetic_temporal.run_paired_temporal_experiment",
+        return_value=result,
+    ):
+        main(["--verbose"])
+    verbose_output = capsys.readouterr().out
+    assert "all aggregates" in verbose_output
+    assert verbose_output.count("/ Supervised /") == 12
+
+
 def test_direct_path_ablation_removes_the_controlled_copy_path() -> None:
     result = run_temporal_experiment(
         small_config(),
@@ -72,6 +131,22 @@ def test_immediate_copy_observes_repeated_symbols_and_eos() -> None:
     assert trial.report.event_recall >= 0.0
 
 
+def test_supervised_immediate_trains_eos_from_input_end() -> None:
+    config = TemporalExperimentConfig(
+        sequences=(("A",),), training_trials=12, ticks_per_frame=3, response_ticks=64
+    )
+    trial = run_temporal_experiment(
+        config,
+        conditions=(CopyCondition.IMMEDIATE,),
+        controls=(Control.TRAINED,),
+    ).trials[0]
+
+    assert [event.name for event in trial.observed] == ["A", "<EOS>"]
+    assert trial.report.event_recall == 1.0
+    assert trial.report.eos_accuracy
+    assert trial.weight_change > 0.0
+
+
 def test_delayed_trial_observes_eos_but_not_presented_symbols() -> None:
     result = run_temporal_experiment(
         small_config(),
@@ -80,6 +155,22 @@ def test_delayed_trial_observes_eos_but_not_presented_symbols() -> None:
     )
 
     assert all(trial.report.event_recall >= 0.0 for trial in result.trials)
+
+
+def test_supervised_delayed_starts_response_at_input_end() -> None:
+    config = TemporalExperimentConfig(
+        sequences=(("A",),), training_trials=12, ticks_per_frame=3, response_ticks=64
+    )
+    trial = run_temporal_experiment(
+        config,
+        conditions=(CopyCondition.DELAYED,),
+        controls=(Control.TRAINED,),
+    ).trials[0]
+
+    assert [event.name for event in trial.observed] == ["A", "<EOS>"]
+    assert trial.report.event_recall == 1.0
+    assert trial.report.eos_accuracy
+    assert trial.weight_change > 0.0
 
 
 def test_held_out_sequences_are_evaluated_against_unshuffled_targets() -> None:
@@ -150,3 +241,55 @@ def test_training_exception_resets_input_session() -> None:
         runtime.train_input_events(broken_events())
     assert runtime.response_session.state.value == "idle"
     assert not runtime.response_session.input_active
+
+
+def test_synthetic_input_has_no_eos_or_teacher_frame() -> None:
+    events, labelled = _stream(small_config(), ("A",))
+
+    assert any(event is InputSignal.INPUT_END for event in events)
+    assert all(not isinstance(event, tuple) for event in events)
+    assert [label for _, label in labelled] == ["A"]
+
+
+def test_supervised_eos_alignment_does_not_receive_a_fabricated_boundary_frame() -> None:
+    config = small_config()
+    runtime = _make_runtime(config, seed=12)
+    original = runtime._apply_supervised_target
+    wrapped = Mock(wraps=original)
+
+    _, labelled = _stream(config, ("A",))
+    with patch.object(runtime, "_apply_supervised_target", wrapped):
+        runtime.train_input_events([InputSignal.INPUT_BEGIN, *labelled, InputSignal.INPUT_END])
+    seen = [call.args[0] for call in wrapped.call_args_list]
+    assert seen
+    assert all(not frame[0] and not frame[1] for frame in seen)
+
+
+def test_reward_training_uses_actual_output_for_reward() -> None:
+    config = TemporalExperimentConfig(
+        sequences=(("A",),), training_trials=1, response_ticks=4, ticks_per_frame=1
+    )
+    result = run_temporal_experiment(
+        config,
+        conditions=(CopyCondition.DELAYED,),
+        controls=(Control.TRAINED,),
+        agents=(AgentKind.REWARD_MODULATED_STDP,),
+    )
+    trial = result.trials[0]
+    assert trial.training_mode is TrainingMode.REWARD_MODULATED_STDP
+    assert trial.reward <= 0.0 or trial.report.event_recall > 0.0
+    assert trial.eligibility_change > 0.0
+
+
+def test_delayed_reward_events_are_timestamped_after_input() -> None:
+    config = TemporalExperimentConfig(ticks_per_frame=2, response_ticks=4)
+    runtime = _make_runtime(config, seed=11)
+    events, _ = _stream(config, ("A",))
+
+    observed = runtime.run_input_events(
+        events, response_ticks=config.response_ticks, observe_during_input=False
+    )
+
+    input_ticks = sum(isinstance(event, np.ndarray) for event in events) + 2
+    assert runtime.output_readout.timestamp == input_ticks + config.response_ticks - 1
+    assert all(event.timestamp >= input_ticks - 1 for event in observed)

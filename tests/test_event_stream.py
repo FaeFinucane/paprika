@@ -7,11 +7,20 @@ from continual_agent.evaluation.event_stream import (
     EventOutcome,
     EventStreamConfig,
     EventStreamReport,
+    RewardSchedule,
     SilenceInterval,
     TargetEvent,
     evaluate_event_stream,
 )
 from continual_agent.simulation.population_layout import Population
+
+
+def test_early_reward_schedule_is_asymmetric_and_event_level() -> None:
+    config = RewardSchedule.for_stage("early").event_config(patience_window=2)
+    assert config.correct_reward > 1.0
+    assert -0.1 <= config.incorrect_reward <= 0.0
+    assert config.missing_reward == 0.0
+    assert config.unwanted_reward == config.incorrect_reward
 
 
 def event(name: str, timestamp: int) -> OutputEvent:

@@ -9,9 +9,9 @@ local updates plus delayed reward.
 
 ### 1. Input presentation
 
-`TextEncoder.feature_vector()` creates bounded features and
-`TextEncoder.present()` emits rate-coded frames with `INPUT_BEGIN` and
-`INPUT_END`. `AgentConfig.presentation_speed` holds each frame for a chosen
+`TextEncoder.feature_vector()` creates bounded semantic features and
+`TextEncoder.present()` emits rate-coded frames with dedicated neural
+`INPUT_BEGIN` and `INPUT_END` currents. `AgentConfig.presentation_speed` holds each frame for a chosen
 number of simulation ticks; values above one are an early-teaching slowdown.
 
 Implemented in `src/continual_agent/encoding/text_encoder.py` and orchestrated
@@ -101,6 +101,18 @@ Implemented by `SpikingRuntime.clone_state()` and
 `SpikingRuntime.execute_isolated()` in `src/continual_agent/agent/spiking_runtime.py`;
 `ConversationAgent` supplies only task-state transfer hooks.
 
+Every runtime tick also updates windowed diagnostics for each named population.
+Rates are spikes per neuron per tick; active and silent fractions count neurons
+with at least one or zero spikes in the window, and saturated counts rates at or
+above 0.5 by default. Voltage and threshold summaries are distributions, while
+weight and eligibility norms are available by output pathway.
+
+Population homeostasis is opt-in through `homeostasis_enabled` and its target,
+strength, interval, bound, and population settings on `AgentConfig` or
+`TemporalExperimentConfig`. It adds a bounded shared current after each slow
+window. The default is disabled; no individual firing-rate targets, adaptive
+thresholds, output feedback, gate, or timer mechanism is involved.
+
 ## Current boundary
 
 Raw-frame training is an explicit session: exactly one `INPUT_BEGIN` and
@@ -110,3 +122,9 @@ the iterator or validation fails. The canonical character training operation
 is an ordered event stream ending in EOS and remains a recurrent-state baseline,
 not a general sequence-memory claim. The automated curriculum entry point is
 `src/continual_agent/experiments/run_conversation.py`.
+# Training Protocol
+
+Input presentations begin and end with dedicated neural boundary currents.
+Supervised character training aligns EOS from activity propagated after the genuine
+`INPUT_END` tick and does not fabricate a boundary feature frame. Reward-modulated STDP never injects a teacher output: it
+evaluates actual network events and applies its delayed reward afterward.

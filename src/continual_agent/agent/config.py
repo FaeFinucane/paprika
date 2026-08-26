@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass
 
+from continual_agent.simulation.population_layout import Population
+
 
 @dataclass(frozen=True)
 class AgentConfig:
@@ -18,3 +20,9 @@ class AgentConfig:
     max_response_ticks: int = 144
     presentation_speed: int = 1
     language_alphabet: tuple[str, ...] = ("m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!")
+    homeostasis_enabled: bool = False
+    homeostasis_target_rate: float = 0.1
+    homeostasis_strength: float = 0.01
+    homeostasis_update_interval: int = 100
+    homeostasis_max_current: float = 0.25
+    homeostasis_populations: tuple[Population, ...] = (Population.HIDDEN,)

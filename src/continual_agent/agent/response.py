@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 
 from continual_agent.agent.debug import DebugSnapshot
-from continual_agent.agent.session import SessionExecutionSnapshot, SessionSnapshot
+from continual_agent.agent.session import InputSignal, SessionExecutionSnapshot, SessionSnapshot
 from continual_agent.cognition.readout import Action, Decision
 from continual_agent.language.spiking_decoder import GeneratedResponse
 from continual_agent.simulation.population_layout import Population
@@ -62,13 +62,16 @@ class ResponseMixin:
             self.working_memory.update(feature_activity)
         for event in presentation:
             if event.signal is not None:
-                self.response_session.handle_input_signal(event.signal)
+                self.runtime.step_input_signal(event.signal)
+                if event.signal is InputSignal.INPUT_END:
+                    self.response_session.begin_response()
                 continue
             assert event.frame is not None
             self.response_session.accept_input_frame()
             spikes.append(self.runtime.step(self._frame_current(event.frame)))
 
-        self.response_session.begin_response()
+        if self.response_session.state.value != "responding":
+            self.response_session.begin_response()
         blank = np.zeros(self.config.input_features)
         action_event = None
         for _ in range(self.config.max_thinking_ticks):

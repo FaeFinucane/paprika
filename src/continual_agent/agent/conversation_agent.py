@@ -58,6 +58,12 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
                 reset_synaptic_activity=not self.config.persistent_working_memory,
                 persist_working_memory=self.config.persistent_working_memory,
             ),
+            homeostasis_enabled=self.config.homeostasis_enabled,
+            homeostasis_target_rate=self.config.homeostasis_target_rate,
+            homeostasis_strength=self.config.homeostasis_strength,
+            homeostasis_update_interval=self.config.homeostasis_update_interval,
+            homeostasis_max_current=self.config.homeostasis_max_current,
+            homeostasis_populations=self.config.homeostasis_populations,
         )
         self.encoder = TextEncoder(
             self.config.input_features,

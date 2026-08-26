@@ -21,6 +21,42 @@ class EventOutcome(str, Enum):
 
 
 @dataclass(frozen=True)
+class RewardSchedule:
+    """Event-level third-factor schedule; penalties are not volume-scaled."""
+
+    stage: str = "early"
+    correct: float = 2.0
+    incorrect: float = -0.05
+    missing: float = 0.0
+    silence: float = 0.0
+    unwanted: float = -0.05
+    premature_eos: float = -0.05
+    missing_eos: float = 0.0
+    post_eos: float = -0.05
+
+    @classmethod
+    def for_stage(cls, stage: str) -> "RewardSchedule":
+        if stage == "early":
+            return cls(stage)
+        if stage == "reliable":
+            return cls(stage, 2.0, -0.5, -0.25, 0.0, -0.5, -0.5, -0.25, -0.5)
+        raise ValueError("reward stage must be 'early' or 'reliable'")
+
+    def event_config(self, *, patience_window: int) -> "EventStreamConfig":
+        return EventStreamConfig(
+            patience_window=patience_window,
+            correct_reward=self.correct,
+            incorrect_reward=self.incorrect,
+            missing_reward=self.missing,
+            silence_reward=self.silence,
+            unwanted_reward=self.unwanted,
+            premature_eos_reward=self.premature_eos,
+            missing_eos_reward=self.missing_eos,
+            post_eos_reward=self.post_eos,
+        )
+
+
+@dataclass(frozen=True)
 class TargetEvent:
     """An expected event.  Timestamps are optional and never required."""
 
