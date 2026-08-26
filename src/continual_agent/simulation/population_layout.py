@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
-from typing import ClassVar, Mapping
+from typing import Mapping
 
 
 class Population(str, Enum):
@@ -36,7 +36,6 @@ class PopulationLayout:
                   self.action_count, self.char_count)
         if any(not isinstance(count, int) or isinstance(count, bool) or count <= 0 for count in counts):
             raise ValueError("population counts must be positive integers")
-        starts = (0, self.input_count)
         current = self.input_count + self.hidden_count
         slices = {
             Population.INPUT: slice(0, self.input_count),
@@ -84,19 +83,3 @@ class PopulationLayout:
             return groups[name]
         except KeyError as error:
             raise KeyError(f"unknown {population.value} subgroup: {name}") from error
-
-
-DEFAULT_LAYOUT = PopulationLayout(
-    affect_subgroups=MappingProxyType({
-        name: slice(96 + index * 4, 96 + (index + 1) * 4)
-        for index, name in enumerate(("valence", "arousal", "uncertainty", "curiosity", "threat", "competence", "social_affiliation"))
-    }),
-    action_subgroups=MappingProxyType({
-        name: slice(124 + index * 4, 124 + (index + 1) * 4)
-        for index, name in enumerate(("answer", "clarify", "acknowledge", "uncertain", "revise", "refuse", "wait"))
-    }),
-    char_subgroups=MappingProxyType({
-        token: slice(152 + index * 3, 152 + (index + 1) * 3)
-        for index, token in enumerate(("<EOS>", "m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!"))
-    }),
-)

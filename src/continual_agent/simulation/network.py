@@ -62,3 +62,64 @@ class SpikingNetwork:
         self.tick = 0
         if clear_history:
             self.spike_history.clear()
+
+    def reset_synaptic_activity(self) -> None:
+        """Discard pending synaptic current without changing neuron state."""
+
+        self._pending_current.fill(0.0)
+
+    def reset_neuron_state(self) -> None:
+        """Discard voltage and refractory state without changing pending current."""
+
+        self.neurons.reset_state()
+
+    def state_snapshot(self) -> dict[str, np.ndarray | int]:
+        """Return copied mutable simulation state for a session baseline."""
+
+        return {
+            "voltage": self.neurons.voltage.copy(),
+            "refractory": self.neurons.refractory.copy(),
+            "pending_current": self._pending_current.copy(),
+            "tick": self.tick,
+        }
+
+    def copy(self) -> "SpikingNetwork":
+        """Return a completely independent copy of simulation state."""
+
+        copied = SpikingNetwork(
+            LIFNeurons(
+                self.neurons.count,
+                self.neurons.dt,
+                self.neurons.tau_membrane,
+                self.neurons.resting_potential,
+                self.neurons.reset_potential,
+                self.neurons.threshold,
+                self.neurons.refractory_ticks,
+            ),
+            SparseSynapses(
+                self.synapses.source.copy(),
+                self.synapses.target.copy(),
+                self.synapses.weight.copy(),
+                self.synapses.neuron_count,
+            ),
+            self.tick,
+            [spikes.copy() for spikes in self.spike_history],
+        )
+        copied.neurons.voltage[:] = self.neurons.voltage
+        copied.neurons.refractory[:] = self.neurons.refractory
+        copied._pending_current[:] = self._pending_current
+        return copied
+
+    def restore_state(self, state: dict[str, np.ndarray | int]) -> None:
+        """Restore only dynamic state; connectivity and weights are untouched."""
+
+        voltage = np.asarray(state["voltage"], dtype=float)
+        refractory = np.asarray(state["refractory"], dtype=np.int64)
+        pending = np.asarray(state["pending_current"], dtype=float)
+        expected = (self.neurons.count,)
+        if voltage.shape != expected or refractory.shape != expected or pending.shape != expected:
+            raise ValueError("network state arrays have the wrong shape")
+        self.neurons.voltage[:] = voltage
+        self.neurons.refractory[:] = refractory
+        self._pending_current[:] = pending
+        self.tick = int(state["tick"])

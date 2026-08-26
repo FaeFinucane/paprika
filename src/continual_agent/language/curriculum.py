@@ -33,4 +33,7 @@ def train_reduced_curriculum(
     for stage in reduced_language_curriculum():
         for _ in range(repetitions):
             for example in stage.examples:
-                agent.train_response_text(Action.ANSWER, example)
+                agent.train_response_events(
+                    Action.ANSWER,
+                    agent.language.target_tokens(example),
+                )

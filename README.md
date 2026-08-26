@@ -2,7 +2,7 @@
 
 The first vertical slice is a small, inspectable text-action learner. It uses
 leaky integrate-and-fire neurons, sparse recurrent synapses, reward-modulated
-STDP, a local Hebbian policy readout, and adaptive internal drives.
+STDP, named event readouts, and bounded affective state.
 
 ## Setup
 
@@ -29,5 +29,5 @@ The current curriculum teaches five typed response intents:
 clarify, uncertain, answer, revise, acknowledge
 ```
 
-It is deliberately not a free-form chatbot yet. The experiment is intended to
-make the online learning dynamics visible before language generation is added.
+It is deliberately not a free-form chatbot yet. Character responses use the
+spiking output populations and timestamped event-readout path.

@@ -7,6 +7,7 @@ from continual_agent.cognition.affect import AffectiveEvent, AffectiveState
 from continual_agent.cognition.affect_circuit import AffectiveCircuit
 from continual_agent.simulation.synapses import SparseSynapses
 from continual_agent.environment.scenarios import default_scenarios
+from continual_agent.simulation.population_layout import Population, PopulationLayout
 
 
 def test_success_and_threat_move_affect_in_expected_directions() -> None:
@@ -22,7 +23,7 @@ def test_success_and_threat_move_affect_in_expected_directions() -> None:
     assert state.arousal > 0.2
 
 
-def test_affect_stays_bounded_and_recovers() -> None:
+def test_affect_stays_bounded_and_returns_toward_baseline() -> None:
     state = AffectiveState()
     for _ in range(100):
         state.observe(
@@ -61,19 +62,29 @@ def test_agent_exposes_latest_debug_snapshot() -> None:
 def test_affective_spiking_circuit_aligns_to_targets() -> None:
     circuit = AffectiveCircuit(neurons_per_signal=4)
     input_count = 8
-    affect_start = input_count
+    affect_names = circuit.signal_names
+    affect_start = input_count + 48
+    layout = PopulationLayout(
+        input_count=input_count,
+        affect_count=circuit.neuron_count,
+        affect_subgroups={
+            name: slice(affect_start + index * 4, affect_start + (index + 1) * 4)
+            for index, name in enumerate(affect_names)
+        },
+    )
+    affect = layout.slice(Population.AFFECT)
     affect_count = circuit.neuron_count
     source = np.repeat(np.arange(input_count), affect_count)
     target = np.tile(
-        np.arange(affect_start, affect_start + affect_count), input_count
+        np.arange(affect.start, affect.stop), input_count
     )
     synapses = SparseSynapses(
         source=source,
         target=target,
         weight=np.zeros(source.size),
-        neuron_count=affect_start + affect_count,
+        neuron_count=layout.total_count,
     )
-    edge_indices = circuit.projection_indices(input_count, affect_start)
+    edge_indices = circuit.projection_indices(layout)
     features = np.zeros(8)
     features[2] = 1.0
     before = circuit.projection_prediction(synapses, edge_indices, features)
@@ -85,9 +96,9 @@ def test_affective_spiking_circuit_aligns_to_targets() -> None:
     after = circuit.projection_prediction(synapses, edge_indices, features)
     assert after["threat"] > before["threat"]
     assert after["arousal"] > before["arousal"]
-    frame = np.zeros(affect_start + affect_count, dtype=bool)
-    frame[affect_start:] = True
-    assert set(circuit.decode([frame], affect_start)) == {
+    frame = np.zeros(layout.total_count, dtype=bool)
+    frame[affect] = True
+    assert set(circuit.decode([frame], layout)) == {
         "valence",
         "arousal",
         "uncertainty",

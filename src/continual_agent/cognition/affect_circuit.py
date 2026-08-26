@@ -6,6 +6,7 @@ import numpy as np
 
 from continual_agent.cognition.affect import AffectiveState
 from continual_agent.simulation.synapses import SparseSynapses
+from continual_agent.simulation.population_layout import Population, PopulationLayout
 
 
 AFFECT_SIGNALS = (
@@ -39,27 +40,33 @@ class AffectiveCircuit:
     def neuron_count(self) -> int:
         return len(self.signal_names) * self.neurons_per_signal
 
-    def groups(self, start: int) -> dict[str, np.ndarray]:
+    def groups(self, layout: PopulationLayout) -> dict[str, np.ndarray]:
+        bounds = layout.slice(Population.AFFECT)
+        if bounds.stop - bounds.start != self.neuron_count:
+            raise ValueError("layout affect population does not match circuit")
         return {
             name: np.arange(
-                start + index * self.neurons_per_signal,
-                start + (index + 1) * self.neurons_per_signal,
+                layout.subgroup(Population.AFFECT, name).start,
+                layout.subgroup(Population.AFFECT, name).stop,
             )
-            for index, name in enumerate(self.signal_names)
+            for name in self.signal_names
         }
 
     def projection_indices(
-        self, input_count: int, affect_start: int
+        self, layout: PopulationLayout
     ) -> np.ndarray:
         """Return ``[signal, input_feature, neuron_in_population]`` edge IDs."""
 
+        bounds = layout.slice(Population.AFFECT)
+        input_count = layout.input_count
+        if bounds.stop - bounds.start != self.neuron_count:
+            raise ValueError("layout affect population does not match circuit")
         indices = np.empty(
             (len(self.signal_names), input_count, self.neurons_per_signal),
             dtype=np.int64,
         )
         affect_count = self.neuron_count
         for signal_index in range(len(self.signal_names)):
-            target_start = affect_start + signal_index * self.neurons_per_signal
             for feature in range(input_count):
                 edge_start = feature * affect_count + signal_index * self.neurons_per_signal
                 indices[signal_index, feature] = np.arange(
@@ -108,11 +115,11 @@ class AffectiveCircuit:
         )
 
     def decode(
-        self, spike_frames: list[np.ndarray], affect_start: int
+        self, spike_frames: list[np.ndarray], layout: PopulationLayout
     ) -> dict[str, float]:
         if not spike_frames:
             return {name: 0.0 for name in self.signal_names}
-        groups = self.groups(affect_start)
+        groups = self.groups(layout)
         rates = np.asarray(
             [
                 sum(frame[group].sum() for frame in spike_frames)

@@ -81,12 +81,12 @@ class AffectiveState:
             self.energy = _clip(self.energy - 0.002)
         self._bound_state()
 
-    def recover(self, steps: int = 1) -> None:
-        """Recover energy during idle time without changing other state."""
+    def reset(self) -> None:
+        """Return affect to its configured baseline."""
 
-        if steps < 0:
-            raise ValueError("steps cannot be negative")
-        self.energy = _clip(self.energy + 0.01 * steps)
+        for name, baseline in self._baselines.items():
+            setattr(self, name, baseline)
+        self._bound_state()
 
     def observe(self, event: AffectiveEvent) -> None:
         """Update state from an event and its delayed outcome."""

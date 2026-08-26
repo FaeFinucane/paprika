@@ -2,6 +2,6 @@
 
 from .network import SpikingNetwork
 from .neurons import LIFNeurons
-from .synapses import SparseSynapses
+from .synapses import SparseSynapses, SynapticActivityState
 
-__all__ = ["LIFNeurons", "SparseSynapses", "SpikingNetwork"]
+__all__ = ["LIFNeurons", "SparseSynapses", "SynapticActivityState", "SpikingNetwork"]
