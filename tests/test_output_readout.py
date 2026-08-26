@@ -46,9 +46,9 @@ def test_action_readout_only_exposes_named_layout_groups() -> None:
     assert not hasattr(readout, "policy_weights")
 
 
-def test_repeated_character_requires_release_and_cooldown() -> None:
+def test_repeated_character_requires_release() -> None:
     current = make_layout()
-    readout = EventReadout(current, cooldown=2)
+    readout = EventReadout(current, activation_threshold=1.0, release_threshold=0.5)
     character = current.subgroup(Population.OUTPUT_CHAR, "m")
 
     first = frame()
@@ -128,7 +128,7 @@ def test_arbitration_ties_are_explicit_for_eos_and_action() -> None:
 
 def test_readout_emits_only_the_strongest_simultaneous_character() -> None:
     current = make_layout()
-    readout = EventReadout(current, cooldown=0)
+    readout = EventReadout(current)
     weaker = current.subgroup(Population.OUTPUT_CHAR, "m")
     stronger = current.subgroup(Population.OUTPUT_CHAR, "a")
     active = frame()
@@ -148,42 +148,29 @@ def test_arbitration_priorities_are_configurable() -> None:
     assert policy.arbitrate((eos, character)).selected == character
 
 
-def test_arbitration_reports_cooldown_without_learning_or_selection() -> None:
-    policy = OutputArbitrationPolicy()
-    candidate = OutputCandidate(Population.OUTPUT_CHAR, "m", 4.0, 0)
-    decision = policy.arbitrate((candidate,), cooldown_remaining=2)
-    assert decision.selected is None
-    assert decision.reason == "cooldown"
-    assert decision.cooldown_remaining == 2
-
-
-def test_readout_exposes_arbitration_decision() -> None:
+def test_global_active_output_blocks_other_candidates_until_release() -> None:
     current = make_layout()
-    readout = EventReadout(current, cooldown=2)
+    readout = EventReadout(current, release_threshold=0.5)
     action = current.subgroup(Population.OUTPUT_ACTION, "answer")
     character = current.subgroup(Population.OUTPUT_CHAR, "m")
     first = frame()
     first[action] = 1.0
     active = frame()
+    active[action] = 1.0
     active[character] = 1.0
 
     assert readout.observe(first, timestamp=0) is not None
     assert readout.observe(active, timestamp=1) is None
     assert readout.last_arbitration is not None
-    assert readout.last_arbitration.reason == "cooldown"
+    assert readout.last_arbitration.reason == "active"
     assert readout.last_arbitration.selected is None
+    released = frame()
+    released[character] = 1.0
+    assert readout.observe(released, timestamp=2) is not None
+    assert readout.events[-1].name == "m"
+    assert readout.events[-1].interval == 2
 
 
-def test_cooldown_rejection_requires_a_new_rising_edge() -> None:
-    current = make_layout()
-    readout = EventReadout(current, cooldown=2)
-    character = current.subgroup(Population.OUTPUT_CHAR, "m")
-    active = frame()
-    active[character] = 1.0
-
-    assert readout.observe(active, timestamp=0) is not None
-    assert readout.observe(active, timestamp=1) is None
-    assert readout.observe(active, timestamp=2) is None
-    assert readout.observe(active, timestamp=3) is None
-    assert readout.observe(frame(), timestamp=4) is None
-    assert readout.observe(active, timestamp=5) is not None
+def test_thresholds_require_hysteresis_order() -> None:
+    with np.testing.assert_raises(ValueError):
+        EventReadout(make_layout(), activation_threshold=1.0, release_threshold=1.0)

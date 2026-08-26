@@ -70,7 +70,6 @@ class ArbitrationDecision:
     selected: OutputCandidate | None
     candidates: tuple[OutputCandidate, ...]
     reason: str
-    cooldown_remaining: int = 0
 
 
 class OutputArbitrationPolicy:
@@ -78,8 +77,8 @@ class OutputArbitrationPolicy:
 
     Evidence is the primary signal.  Priorities only resolve equal evidence:
     EOS wins over a character, actions win over characters, and subgroup order
-    is the final stable tie-breaker.  Cooldown is deliberately host-side state,
-    supplied to this stateless policy rather than learned by it.
+    is the final stable tie-breaker. Activation state is deliberately host-side
+    state, supplied by ``EventReadout``.
     """
 
     def __init__(
@@ -96,16 +95,10 @@ class OutputArbitrationPolicy:
     def arbitrate(
         self,
         candidates: Iterable[OutputCandidate],
-        *,
-        cooldown_remaining: int = 0,
     ) -> ArbitrationDecision:
         candidates = tuple(candidates)
-        if cooldown_remaining < 0:
-            raise ValueError("cooldown_remaining must be non-negative")
         if not candidates:
-            return ArbitrationDecision(None, candidates, "no_candidates", cooldown_remaining)
-        if cooldown_remaining:
-            return ArbitrationDecision(None, candidates, "cooldown", cooldown_remaining)
+            return ArbitrationDecision(None, candidates, "no_candidates")
 
         def rank(candidate: OutputCandidate) -> tuple[float, int, int]:
             if candidate.is_eos:
@@ -118,7 +111,7 @@ class OutputArbitrationPolicy:
             return (candidate.evidence, priority, -candidate.order,)
 
         selected = max(candidates, key=rank)
-        return ArbitrationDecision(selected, candidates, "selected", 0)
+        return ArbitrationDecision(selected, candidates, "selected")
 
 
 class EventReadout:
@@ -128,15 +121,17 @@ class EventReadout:
         self,
         layout: PopulationLayout,
         *,
-        threshold: float = 1.0,
-        cooldown: int = 1,
+        activation_threshold: float = 1.0,
+        release_threshold: float = 0.5,
         arbitration: OutputArbitrationPolicy | None = None,
     ) -> None:
-        if threshold <= 0 or cooldown < 0:
-            raise ValueError("threshold must be positive and cooldown non-negative")
+        if activation_threshold <= 0 or release_threshold <= 0:
+            raise ValueError("activation and release thresholds must be positive")
+        if release_threshold >= activation_threshold:
+            raise ValueError("release_threshold must be less than activation_threshold")
         self.layout = layout
-        self.threshold = float(threshold)
-        self.cooldown = cooldown
+        self.activation_threshold = float(activation_threshold)
+        self.release_threshold = float(release_threshold)
         self.arbitration = arbitration or OutputArbitrationPolicy()
         self._groups: dict[Population, dict[str, np.ndarray]] = {
             Population.OUTPUT_ACTION: self._named_groups(layout.action_subgroups),
@@ -156,7 +151,7 @@ class EventReadout:
         self.events: list[OutputEvent] = []
         self.arbitrations: list[ArbitrationDecision] = []
         self.last_arbitration: ArbitrationDecision | None = None
-        self._latched: set[tuple[Population, str]] = set()
+        self.active_output: tuple[Population, str] | None = None
         self._last_event_timestamp: int | None = None
 
     def observe(
@@ -192,39 +187,30 @@ class EventReadout:
         self.timestamp = timestamp
         if self.stopped:
             return None
+        if self.active_output is not None:
+            population, name = self.active_output
+            group = self._groups[population][name]
+            if float(values[group].sum()) >= self.release_threshold:
+                self.last_arbitration = ArbitrationDecision(None, (), "active")
+                self.arbitrations.append(self.last_arbitration)
+                return None
+            self.active_output = None
         selected = tuple(populations) if populations is not None else tuple(self._groups)
         candidates: list[OutputCandidate] = []
         for population in selected:
             for order, (name, group) in enumerate(self._groups.get(population, {}).items()):
                 evidence = float(values[group].sum())
-                key = (population, name)
-                if evidence < self.threshold:
-                    self._latched.discard(key)
-                    continue
-                if key not in self._latched:
+                if evidence >= self.activation_threshold:
                     candidates.append(OutputCandidate(population, name, evidence, order))
-        cooldown_remaining = 0
-        if self._last_event_timestamp is not None:
-            cooldown_remaining = max(
-                0, self.cooldown - (timestamp - self._last_event_timestamp)
-            )
-        decision = self.arbitration.arbitrate(
-            candidates, cooldown_remaining=cooldown_remaining
-        )
+        decision = self.arbitration.arbitrate(candidates)
         self.last_arbitration = decision
         self.arbitrations.append(decision)
-        if decision.reason == "cooldown":
-            # A rejected activation is consumed at this edge. It must fall
-            # below threshold before it can become a candidate again.
-            self._latched.update(
-                (candidate.population, candidate.name) for candidate in candidates
-            )
         if decision.selected is None:
             return None
         selected = decision.selected
         evidence, name, population = selected.evidence, selected.name, selected.population
         key = (population, name)
-        self._latched.add(key)
+        self.active_output = key
         event = OutputEvent(
             population,
             name,

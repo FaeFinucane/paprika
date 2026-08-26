@@ -37,10 +37,12 @@ readouts, plasticity targeting, and tests rather than duplicated offsets.
 - Input, hidden, affect, and action activity can project to character output
   populations through the sparse graph. The hidden region is recurrent space,
   not a separate language module.
-- `EventReadout` observes action or character evidence, latches threshold
-  crossings, applies cooldown, records timestamps, and deterministically
-  arbitrates simultaneous candidates. Silence is not an event. `<EOS>` is a
-  terminal character event.
+- `EventReadout` observes action or character evidence with separate activation
+  and release thresholds. One output is globally active at a time; no other
+  output is registered until that active population falls below the release
+  threshold. Simultaneous candidates are deterministically arbitrated, and
+  timestamps and inter-event intervals are recorded. Silence is not an event.
+  `<EOS>` is a terminal character event.
 - `ResponseSession` tracks input and response lifecycle. Readout state is
   response-local by default; recurrent neuron state, synaptic activity, affect,
   working memory, and eligibility persist according to `SessionPolicy`.

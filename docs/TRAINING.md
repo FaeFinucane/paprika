@@ -39,6 +39,11 @@ Implemented in `ConversationAgent.train_response()` and
 `RewardModulatedSTDP.reinforce()`; action groups are defined by
 `src/continual_agent/cognition/readout.py` and `PopulationLayout`.
 
+`EventReadout` uses hysteresis: a new output must reach
+`activation_threshold`, then remains globally active until its population falls
+below `release_threshold`. This prevents sustained activity from repeating an
+event while allowing the same output to fire again after release.
+
 ### 4. Ordered character teacher alignment
 
 `train_response_events(act, target_events)` presents the action context once,

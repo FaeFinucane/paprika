@@ -377,8 +377,8 @@ class ConversationAgent:
         isolated.affect = deepcopy(self.affect)
         isolated.output_readout = EventReadout(
             self.layout,
-            threshold=self.output_readout.threshold,
-            cooldown=self.output_readout.cooldown,
+            activation_threshold=self.output_readout.activation_threshold,
+            release_threshold=self.output_readout.release_threshold,
             arbitration=deepcopy(self.output_readout.arbitration),
         )
         isolated.affect_circuit = deepcopy(self.affect_circuit)
