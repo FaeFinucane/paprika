@@ -22,7 +22,7 @@ AFFECT_SIGNALS = (
 class AffectiveCircuit:
     """Population layout and local alignment for neural affect signals.
 
-    The neurons themselves belong to ``SpikingNetwork``. This class only knows
+    The neurons themselves belong to ``NetworkCore``. This class only knows
     how affect populations are laid out, decoded, and aligned to teacher
     targets; it does not run a second neural simulator.
     """

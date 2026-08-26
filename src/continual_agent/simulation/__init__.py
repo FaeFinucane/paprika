@@ -1,7 +1,12 @@
 """Low-level deterministic spiking-network simulation."""
 
-from .network import SpikingNetwork
+from .core import NetworkCore
 from .neurons import LIFNeurons
 from .synapses import SparseSynapses, SynapticActivityState
 
-__all__ = ["LIFNeurons", "SparseSynapses", "SynapticActivityState", "SpikingNetwork"]
+__all__ = [
+    "LIFNeurons",
+    "NetworkCore",
+    "SparseSynapses",
+    "SynapticActivityState",
+]

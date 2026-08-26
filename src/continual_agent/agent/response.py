@@ -21,7 +21,7 @@ class ResponseMixin:
     last_execution_snapshot: SessionExecutionSnapshot | None
 
     def _start_response_session(self: Any) -> None:
-        policy = self.response_session.policy
+        policy = self.runtime.response_session.policy
         if not policy.persist_affect:
             self.affect.reset()
         if not policy.persist_working_memory:
@@ -30,7 +30,7 @@ class ResponseMixin:
         snapshot = self.runtime.response_session.snapshot
         assert snapshot is not None
         self.last_execution_snapshot = SessionExecutionSnapshot(
-            snapshot, self.network.synapses.weight
+            snapshot, self.runtime.network.synapses.weight
         )
 
     def _current_session_snapshot(self: Any) -> SessionSnapshot:
@@ -39,7 +39,7 @@ class ResponseMixin:
     def _finish_response(self: Any, *, exhausted: bool) -> None:
         snapshot = self._current_session_snapshot()
         self.last_execution_snapshot = SessionExecutionSnapshot(
-            snapshot, self.network.synapses.weight
+            snapshot, self.runtime.network.synapses.weight
         )
         self.runtime.finish_session(
             exhausted=exhausted, affect=self.affect, working_memory=self.working_memory
@@ -47,7 +47,7 @@ class ResponseMixin:
 
     def _frame_current(self: Any, frame: np.ndarray) -> np.ndarray:
         current = self.runtime.current(frame, tonic_affect=True)
-        if self.response_session.policy.persist_working_memory:
+        if self.runtime.response_session.policy.persist_working_memory:
             current[: self.config.input_features] += self.working_memory.context_current()
         return current
 
@@ -58,28 +58,28 @@ class ResponseMixin:
         spikes: list[np.ndarray] = []
         presentation = self.encoder.present(text)
         feature_activity = self.encoder.feature_vector(text)
-        if self.response_session.policy.persist_working_memory:
+        if self.runtime.response_session.policy.persist_working_memory:
             self.working_memory.update(feature_activity)
         for event in presentation:
             if event.signal is not None:
                 self.runtime.step_input_signal(event.signal)
                 if event.signal is InputSignal.INPUT_END:
-                    self.response_session.begin_response()
+                    self.runtime.response_session.begin_response()
                 continue
             assert event.frame is not None
-            self.response_session.accept_input_frame()
+            self.runtime.response_session.accept_input_frame()
             spikes.append(self.runtime.step(self._frame_current(event.frame)))
 
-        if self.response_session.state.value != "responding":
-            self.response_session.begin_response()
+        if self.runtime.response_session.state.value != "responding":
+            self.runtime.response_session.begin_response()
         blank = np.zeros(self.config.input_features)
         action_event = None
         for _ in range(self.config.max_thinking_ticks):
             emitted = self.runtime.step(self._frame_current(blank))
             spikes.append(emitted)
-            action_event = self.output_readout.observe(
+            action_event = self.runtime.output_readout.observe(
                 emitted,
-                activation=self.network.neurons.voltage,
+                activation=self.runtime.network.neurons.voltage,
                 populations=(Population.OUTPUT_ACTION,),
             )
             if action_event is not None:
@@ -104,11 +104,11 @@ class ResponseMixin:
                 },
                 timed_out=False,
             )
-        neural_affect = self.affect_circuit.decode(spikes, self.layout)
+        neural_affect = self.affect_circuit.decode(spikes, self.runtime.layout)
         self.last_snapshot = DebugSnapshot.from_decision(
             result, self.affect, neural_affect, self.working_memory.snapshot()
         )
-        self.response_session.abort(self._current_session_snapshot())
+        self.runtime.response_session.abort(self._current_session_snapshot())
         return result
 
     def generate_response(
@@ -123,7 +123,7 @@ class ResponseMixin:
         if self.config.max_response_ticks < 0:
             raise ValueError("max_response_ticks cannot be negative")
         self._start_response_session()
-        self.response_session.begin_response()
+        self.runtime.response_session.begin_response()
         generated: list[str] = []
         context = self.encoder.feature_vector(act.value)
         emitted_tokens = 0
@@ -133,9 +133,9 @@ class ResponseMixin:
             emitted = self.runtime.step(
                 self._frame_current(context if tick == 0 else np.zeros(self.config.input_features))
             )
-            event = self.output_readout.observe(
+            event = self.runtime.output_readout.observe(
                 emitted,
-                activation=self.network.neurons.voltage,
+                activation=self.runtime.network.neurons.voltage,
                 populations=(Population.OUTPUT_CHAR,),
             )
             if event is None:

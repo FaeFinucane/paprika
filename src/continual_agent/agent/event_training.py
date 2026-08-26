@@ -27,22 +27,27 @@ class EventTrainingMixin:
             token = getattr(event, "label", event)
             current = self._frame_current(context if event_index == 0 else blank)
             emitted = self.runtime.step(current)
-            source_activity = np.maximum(self.network.neurons.voltage, emitted.astype(float))
+            source_activity = np.maximum(
+                self.runtime.network.neurons.voltage, emitted.astype(float)
+            )
             if event_index == 0:
                 self.language.align_next_token(
-                    self.network.synapses, self.token_input_edge_indices, context, token
+                    self.runtime.network.synapses,
+                    self.runtime.token_input_edge_indices,
+                    context,
+                    token,
                 )
             self.language.align_recurrent_token(
-                self.network.synapses,
-                self.recurrent_event_edge_indices,
+                self.runtime.network.synapses,
+                self.runtime.recurrent_event_edge_indices,
                 source_activity,
                 token,
-                layout=self.layout,
+                layout=self.runtime.layout,
             )
             teacher = self._frame_current(blank)
-            teacher[self.layout.subgroup(Population.OUTPUT_CHAR, token)] += 3.0
+            teacher[self.runtime.layout.subgroup(Population.OUTPUT_CHAR, token)] += 3.0
             self.runtime.step(teacher)
-        self.plasticity.reset_traces()
+        self.runtime.plasticity.reset_traces()
 
     def train_input_events(
         self: Any, events: Iterable[InputSignal | tuple[np.ndarray, str]]
@@ -78,7 +83,7 @@ class EventTrainingMixin:
         self.generate_response(act)
         report = evaluate_event_stream(
             target_events,
-            tuple(self.output_readout.events),
+            tuple(self.runtime.output_readout.events),
             config=config,
             end_time=self.config.max_response_ticks if end_time is None else end_time,
             silence_intervals=silence_intervals,

@@ -42,6 +42,9 @@ class PopulationHomeostasis:
     def current(self) -> np.ndarray:
         return self.drive.copy()
 
+    def current_into(self, output: np.ndarray) -> None:
+        np.add(output, self.drive, out=output)
+
     def observe(self, spikes: np.ndarray) -> None:
         if not self.enabled:
             return

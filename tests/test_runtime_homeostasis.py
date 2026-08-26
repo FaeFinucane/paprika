@@ -15,6 +15,8 @@ def test_population_metrics_define_activity_fractions_and_distributions() -> Non
         metrics.record(np.asarray(spikes), np.asarray(voltage))
 
     result = metrics.population(Population.HIDDEN, 1.0).as_dict()
+    assert result["neuron_count"] == 2.0
+    assert result["spike_count"] == 2.0
     assert result["firing_rate_mean"] == 0.5
     assert result["firing_rate_spread"] == 0.5
     assert result["active_fraction"] == 0.5
@@ -23,6 +25,8 @@ def test_population_metrics_define_activity_fractions_and_distributions() -> Non
     assert result["voltage_min"] == 0.2
     assert result["voltage_max"] == 0.5
     assert result["threshold_mean"] == 1.0
+    metrics.record_output_event()
+    assert metrics.output_event_rate == 0.5
 
 
 def test_homeostasis_moves_toward_target_and_is_bounded() -> None:
@@ -52,10 +56,10 @@ def test_homeostasis_does_not_change_stdp_specialization() -> None:
         homeostasis_enabled=True,
         homeostasis_update_interval=1,
     )
-    before = runtime.synapses.weight.copy()
+    before = runtime.network.synapses.weight.copy()
     for _ in range(8):
-        runtime.step(np.zeros(runtime.neurons.count))
-    np.testing.assert_array_equal(runtime.synapses.weight, before)
+        runtime.step(np.zeros(runtime.network.neurons.count))
+    np.testing.assert_array_equal(runtime.network.synapses.weight, before)
     assert np.any(runtime.homeostasis.drive != 0.0)
 
 
@@ -75,7 +79,7 @@ def test_enabled_homeostasis_is_deterministic_for_a_seed() -> None:
 
     first = make_runtime()
     second = make_runtime()
-    current = np.zeros(first.neurons.count)
+    current = np.zeros(first.network.neurons.count)
     for _ in range(12):
         np.testing.assert_array_equal(first.step(current), second.step(current))
     np.testing.assert_array_equal(first.homeostasis.drive, second.homeostasis.drive)

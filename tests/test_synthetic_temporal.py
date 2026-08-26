@@ -190,8 +190,8 @@ def test_held_out_sequences_are_evaluated_against_unshuffled_targets() -> None:
 def test_production_runtime_exposes_the_pathways_used_by_controls() -> None:
     agent = ConversationAgent(AgentConfig(input_features=4, language_alphabet=("A", "B"), seed=1))
     assert isinstance(agent.runtime, SpikingRuntime)
-    assert agent.token_input_edge_indices.size > 0
-    assert agent.recurrent_event_edge_indices.size > 0
+    assert agent.runtime.token_input_edge_indices.size > 0
+    assert agent.runtime.recurrent_event_edge_indices.size > 0
     assert agent.runtime.hidden_output_edge_indices.size > 0
     assert agent.runtime.direct_input_output_edge_indices.size > 0
 
@@ -227,7 +227,7 @@ def test_direct_ablation_mask_survives_training() -> None:
     runtime.train_input_events(
         (InputSignal.INPUT_BEGIN, (np.array([0.0, 0.0, 5.0, 0.0]), "A"), InputSignal.INPUT_END)
     )
-    assert np.all(runtime.synapses.weight[edges] == 0.0)
+    assert np.all(runtime.network.synapses.weight[edges] == 0.0)
 
 
 def test_training_exception_resets_input_session() -> None:

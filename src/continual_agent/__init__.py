@@ -1,5 +1,5 @@
 """Continually learning spiking-agent research prototype."""
 
-from .simulation.network import SpikingNetwork
+from .simulation import NetworkCore
 
-__all__ = ["SpikingNetwork"]
+__all__ = ["NetworkCore"]

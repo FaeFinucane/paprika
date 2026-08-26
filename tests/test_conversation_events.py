@@ -14,9 +14,11 @@ def test_baseline_current_does_not_activate_candidate_outputs() -> None:
 
     current = agent._frame_current(np.zeros(agent.config.input_features))
 
-    np.testing.assert_array_equal(current[agent.layout.slice(Population.OUTPUT_ACTION)], 0.0)
-    np.testing.assert_array_equal(current[agent.layout.slice(Population.OUTPUT_CHAR)], 0.0)
-    np.testing.assert_array_equal(current[agent.layout.slice(Population.AFFECT)], 1.01)
+    np.testing.assert_array_equal(
+        current[agent.runtime.layout.slice(Population.OUTPUT_ACTION)], 0.0
+    )
+    np.testing.assert_array_equal(current[agent.runtime.layout.slice(Population.OUTPUT_CHAR)], 0.0)
+    np.testing.assert_array_equal(current[agent.runtime.layout.slice(Population.AFFECT)], 1.01)
 
 
 def test_nonblank_current_does_not_tonic_drive_action_outputs() -> None:
@@ -24,8 +26,10 @@ def test_nonblank_current_does_not_tonic_drive_action_outputs() -> None:
 
     current = agent._frame_current(np.ones(agent.config.input_features))
 
-    np.testing.assert_array_equal(current[agent.layout.slice(Population.OUTPUT_ACTION)], 0.0)
-    np.testing.assert_array_equal(current[agent.layout.slice(Population.OUTPUT_CHAR)], 0.0)
+    np.testing.assert_array_equal(
+        current[agent.runtime.layout.slice(Population.OUTPUT_ACTION)], 0.0
+    )
+    np.testing.assert_array_equal(current[agent.runtime.layout.slice(Population.OUTPUT_CHAR)], 0.0)
 
 
 def test_untrained_response_does_not_emit_baseline_eos_or_character() -> None:
@@ -35,56 +39,56 @@ def test_untrained_response_does_not_emit_baseline_eos_or_character() -> None:
 
     assert response.tokens == ()
     assert not response.stopped_on_eos
-    assert agent.output_readout.events == []
+    assert agent.runtime.output_readout.events == []
 
 
 def test_generate_response_emits_repeats_and_eos_only_as_readout_events() -> None:
     agent = ConversationAgent()
-    zero = np.zeros(agent.layout.total_count)
+    zero = np.zeros(agent.runtime.layout.total_count)
 
     def output(name: str, amount: float = 1.0) -> np.ndarray:
         frame = zero.copy()
-        frame[agent.layout.subgroup(Population.OUTPUT_CHAR, name)] = amount
+        frame[agent.runtime.layout.subgroup(Population.OUTPUT_CHAR, name)] = amount
         return frame
 
     frames = iter((output("m"), zero, output("m"), output("<EOS>")))
-    agent.network.step = lambda current: next(frames)
+    agent.runtime.network.step = lambda current: next(frames)
 
     response = agent.generate_response(Action.ANSWER, max_tokens=4)
 
     assert response.tokens == ("m", "m")
     assert response.text == "mm"
     assert response.stopped_on_eos
-    assert [event.name for event in agent.output_readout.events] == ["m", "m", "<EOS>"]
+    assert [event.name for event in agent.runtime.output_readout.events] == ["m", "m", "<EOS>"]
 
 
 def test_generate_response_silence_does_not_become_character_or_eos() -> None:
     agent = ConversationAgent()
-    zero = np.zeros(agent.layout.total_count)
+    zero = np.zeros(agent.runtime.layout.total_count)
     agent.config = replace(agent.config, max_response_ticks=3)
-    agent.network.step = lambda current: zero.copy()
+    agent.runtime.network.step = lambda current: zero.copy()
 
     response = agent.generate_response(Action.ANSWER, max_tokens=2)
 
     assert response.tokens == ()
     assert not response.stopped_on_eos
-    assert agent.output_readout.events == []
+    assert agent.runtime.output_readout.events == []
 
 
 def test_host_action_response_uses_event_arbitration() -> None:
     agent = ConversationAgent()
-    zero = np.zeros(agent.layout.total_count)
+    zero = np.zeros(agent.runtime.layout.total_count)
     frame = zero.copy()
-    frame[agent.layout.subgroup(Population.OUTPUT_ACTION, "answer")] = 1.0
-    frame[agent.layout.subgroup(Population.OUTPUT_ACTION, "clarify")] = 2.0
-    agent.network.step = lambda current: frame.copy()
+    frame[agent.runtime.layout.subgroup(Population.OUTPUT_ACTION, "answer")] = 1.0
+    frame[agent.runtime.layout.subgroup(Population.OUTPUT_ACTION, "clarify")] = 2.0
+    agent.runtime.network.step = lambda current: frame.copy()
 
     response = agent.respond("")
 
     assert response.action is Action.CLARIFY
     assert response.evidence[Action.CLARIFY] > response.evidence[Action.ANSWER]
-    assert agent.output_readout.last_arbitration is not None
-    assert agent.output_readout.last_arbitration.selected is not None
+    assert agent.runtime.output_readout.last_arbitration is not None
+    assert agent.runtime.output_readout.last_arbitration.selected is not None
 
 
 def test_failed_raw_input_stream_cleans_up_runtime() -> None:
@@ -100,6 +104,6 @@ def test_failed_raw_input_stream_cleans_up_runtime() -> None:
             response_ticks=1,
         )
 
-    assert agent.response_session.state is SessionState.IDLE
-    assert not agent.response_session.input_active
-    assert agent.output_readout.events == []
+    assert agent.runtime.response_session.state is SessionState.IDLE
+    assert not agent.runtime.response_session.input_active
+    assert agent.runtime.output_readout.events == []

@@ -19,11 +19,11 @@ by `ConversationAgent` in `src/continual_agent/agent/conversation_agent.py`.
 
 ### 2. Network simulation and eligibility
 
-Each presented frame advances `SpikingNetwork`. `RewardModulatedSTDP.observe()`
+Each presented frame advances `NetworkCore`. `RewardModulatedSTDP.observe()`
 maintains pre/post traces and edge eligibility from spikes. It does not change
 weights until a later reinforcement call.
 
-Implemented in `src/continual_agent/simulation/network.py` and
+Implemented in `src/continual_agent/simulation/core.py` and
 `src/continual_agent/plasticity/stdp.py`; calls are made by
 `ConversationAgent.respond()`, `generate_response()`, and training methods.
 
@@ -122,9 +122,12 @@ the iterator or validation fails. The canonical character training operation
 is an ordered event stream ending in EOS and remains a recurrent-state baseline,
 not a general sequence-memory claim. The automated curriculum entry point is
 `src/continual_agent/experiments/run_conversation.py`.
-# Training Protocol
+
+## Runtime ownership
 
 Input presentations begin and end with dedicated neural boundary currents.
-Supervised character training aligns EOS from activity propagated after the genuine
-`INPUT_END` tick and does not fabricate a boundary feature frame. Reward-modulated STDP never injects a teacher output: it
-evaluates actual network events and applies its delayed reward afterward.
+`NetworkCore` advances neurons and delayed sparse synapses; drives provide
+current and plugins observe the resulting arrays. `RewardModulatedSTDP` owns
+eligibility and weight updates, while delayed reward is applied after readout
+evaluation. Supervised training remains an explicit runtime protocol rather than
+a second network implementation.

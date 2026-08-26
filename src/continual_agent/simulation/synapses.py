@@ -133,9 +133,17 @@ class SparseSynapses:
             raise ValueError(f"spikes must have shape ({self.neuron_count},)")
 
         current = np.zeros(self.neuron_count, dtype=float)
+        self.transmit_into(spikes, current)
+        return current
+
+    def transmit_into(self, spikes: np.ndarray, current: np.ndarray) -> None:
+        """Write next-tick current into a caller-owned buffer."""
+        spikes = np.asarray(spikes, dtype=bool)
+        if spikes.shape != (self.neuron_count,) or current.shape != (self.neuron_count,):
+            raise ValueError(f"spikes and current must have shape ({self.neuron_count},)")
+        current.fill(0.0)
         active_edges = spikes[self.source]
         np.add.at(current, self.target[active_edges], self.weight[active_edges])
-        return current
 
     def add_edges(self, source: np.ndarray, target: np.ndarray, weight: np.ndarray) -> None:
         """Append connections, useful for explicit sensory projections."""

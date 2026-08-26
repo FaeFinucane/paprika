@@ -19,6 +19,8 @@ class PopulationDiagnostics:
     Rates are spikes per neuron per simulation tick.
     """
 
+    neuron_count: float
+    spike_count: float
     firing_rate_mean: float
     firing_rate_spread: float
     active_fraction: float
@@ -35,6 +37,8 @@ class PopulationDiagnostics:
 
     def as_dict(self) -> dict[str, float]:
         return {
+            "neuron_count": self.neuron_count,
+            "spike_count": self.spike_count,
             "firing_rate_mean": self.firing_rate_mean,
             "firing_rate_spread": self.firing_rate_spread,
             "active_fraction": self.active_fraction,
@@ -63,6 +67,7 @@ class RuntimeMetrics:
 
     def reset(self) -> None:
         self.ticks = 0
+        self.output_events = 0
         self.spikes = np.zeros(self.layout.total_count)
         self.voltage_sum = np.zeros(self.layout.total_count)
         self.voltage_square_sum = np.zeros(self.layout.total_count)
@@ -81,6 +86,13 @@ class RuntimeMetrics:
         self.voltage_minimum = np.minimum(self.voltage_minimum, voltage)
         self.voltage_maximum = np.maximum(self.voltage_maximum, voltage)
 
+    def record_output_event(self) -> None:
+        self.output_events += 1
+
+    @property
+    def output_event_rate(self) -> float:
+        return float(self.output_events / max(self.ticks, 1))
+
     def population(
         self, population: Population, threshold: float | np.ndarray
     ) -> PopulationDiagnostics:
@@ -97,11 +109,13 @@ class RuntimeMetrics:
         )[indices]
         observed = self.ticks > 0
         return PopulationDiagnostics(
+            float(rates.size),
+            float(self.spikes[indices].sum()),
             float(rates.mean()) if rates.size else 0.0,
             float(rates.std()) if rates.size else 0.0,
             float(np.mean(rates > 0.0)) if rates.size else 0.0,
             float(np.mean(rates == 0.0)) if rates.size else 0.0,
-            float(np.mean(rates >= self.saturation_rate)) if rates.size else 0.0,
+            float(np.mean(rates >= self.saturation_rate)) if rates.size and observed else 0.0,
             float(voltage_mean.mean()) if rates.size else 0.0,
             float(np.sqrt(voltage_variance.mean())) if rates.size else 0.0,
             float(self.voltage_minimum[indices].min()) if rates.size and observed else 0.0,

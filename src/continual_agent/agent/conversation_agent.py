@@ -13,7 +13,6 @@ from continual_agent.agent.event_training import EventTrainingMixin
 from continual_agent.agent.response import ResponseMixin
 from continual_agent.agent.session import (
     ConflictPolicy,
-    ResponseSession,
     SessionExecutionSnapshot,
     SessionPolicy,
 )
@@ -78,42 +77,6 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
         self.last_snapshot: DebugSnapshot | None = None
         self.last_execution_snapshot: SessionExecutionSnapshot | None = None
 
-    @property
-    def response_session(self) -> ResponseSession:
-        return self.runtime.response_session
-
-    @property
-    def network(self):
-        return self.runtime.network
-
-    @property
-    def layout(self):
-        return self.runtime.layout
-
-    @property
-    def token_input_edge_indices(self):
-        return self.runtime.token_input_edge_indices
-
-    @property
-    def recurrent_event_edge_indices(self):
-        return self.runtime.recurrent_event_edge_indices
-
-    @property
-    def affect_edge_indices(self):
-        return self.runtime.affect_edge_indices
-
-    @property
-    def affect_action_edge_indices(self):
-        return self.runtime.affect_action_edge_indices
-
-    @property
-    def output_readout(self):
-        return self.runtime.output_readout
-
-    @property
-    def plasticity(self):
-        return self.runtime.plasticity
-
     def execute_isolated(
         self,
         operation: Callable[[ConversationAgent], T],
@@ -173,10 +136,10 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
         self.reward_ledger.extend(report.records)
         prediction_error = report.total_reward - self.reward_baseline
         self.reward_baseline += 0.05 * prediction_error
-        self.plasticity.reinforce(
+        self.runtime.plasticity.reinforce(
             prediction_error, self.affect.modulation(), target_neurons=target_neurons
         )
-        self.plasticity.reset_traces()
+        self.runtime.plasticity.reset_traces()
         return prediction_error
 
     def train_response(self, text: str, expected: Action) -> AgentAction:
@@ -184,11 +147,11 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
         reward = 1.0 if decision.action == expected else -1.0
         prediction_error = reward - self.reward_baseline
         self.reward_baseline += 0.05 * prediction_error
-        action_group = self.readout.groups(self.layout)[decision.action]
-        self.plasticity.reinforce(
+        action_group = self.readout.groups(self.runtime.layout)[decision.action]
+        self.runtime.plasticity.reinforce(
             prediction_error, self.affect.modulation(), target_neurons=action_group
         )
-        self.plasticity.reset_traces()
+        self.runtime.plasticity.reset_traces()
         self.affect.observe(
             AffectiveEvent(
                 reward_prediction_error=prediction_error,
@@ -199,13 +162,16 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
         )
         features = self.encoder.feature_vector(text)
         self.affect_circuit.align(
-            self.network.synapses, self.affect_edge_indices, features, self.affect
+            self.runtime.network.synapses,
+            self.runtime.affect_edge_indices,
+            features,
+            self.affect,
         )
         self.last_snapshot = DebugSnapshot.from_decision(
             decision,
             self.affect,
             self.affect_circuit.projection_prediction(
-                self.network.synapses, self.affect_edge_indices, features
+                self.runtime.network.synapses, self.runtime.affect_edge_indices, features
             ),
         )
         return AgentAction(decision.action, decision.confidence, decision.ticks)
@@ -213,7 +179,7 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
     def reset_conversation(self) -> None:
         """Clear turn context while retaining learned synapses and affect priors."""
         self.working_memory.reset()
-        self.network.reset_state()
+        self.runtime.network.reset_state()
 
     def debug_snapshot(self) -> dict[str, object] | None:
         return self.last_snapshot.as_dict() if self.last_snapshot else None

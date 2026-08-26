@@ -17,13 +17,19 @@ The default configuration has 188 neurons:
 | Population | Size | Purpose | Implementation |
 | --- | ---: | --- | --- |
 | `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled in `src/continual_agent/agent/spiking_runtime.py` |
-| `HIDDEN` | 48 | Recurrent internal state | `src/continual_agent/simulation/network.py`; layout in `src/continual_agent/simulation/population_layout.py` |
+| `HIDDEN` | 48 | Recurrent internal state | `src/continual_agent/simulation/core.py`; layout in `src/continual_agent/simulation/population_layout.py` |
 | `AFFECT` | 7 x 4 = 28 | Neural populations for valence, arousal, uncertainty, curiosity, threat, competence, and social affiliation | `src/continual_agent/cognition/affect_circuit.py` and `src/continual_agent/cognition/affect.py` |
 | `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed in `src/continual_agent/agent/spiking_runtime.py` |
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
-`AgentConfig` controls these dimensions. `SpikingRuntime` constructs the layout,
-LIF state, sparse projections, readout, and plasticity object. The canonical
+`AgentConfig` controls these dimensions. `NetworkFactory` owns layout,
+projection, neuron, synapse, drive, plugin, and readout construction. It
+returns one coherent network bundle to `SpikingRuntime`, the canonical
+composition root. `SpikingRuntime` owns only composition, the efficient tick
+loop, and small current/ablation/diagnostic accessors. `RuntimeSession` owns
+lifecycle, snapshots, isolation, and sparse weight-delta merging. `InputRunner`
+owns raw input episode execution and supervised or reward-modulated training.
+The canonical
 `ConversationAgent` facade adds text encoding, affect, working memory, and task
 training without duplicating runtime-owned fields. The layout is consumed by
 projection helpers, readouts, plasticity targeting, and tests rather than
@@ -73,11 +79,12 @@ network is not reset between character events in a response.
   not a learned language-state population.
 - `src/continual_agent/agent/session.py` implements lifecycle, snapshots,
   sparse weight deltas, and explicit merge policies. Runtime isolation is
-  centralized in `SpikingRuntime`; task adapters transfer only their own state.
+  implemented by `runtime_session.py`; task adapters transfer only their own state.
 - `src/continual_agent/environment/protocol.py` and `scenarios.py` define typed
   actions and curriculum scenarios.
 - `src/continual_agent/agent/debug.py` exposes inspectable response snapshots.
-- `runtime_metrics.py` accumulates windowed population diagnostics. Active means
+- `runtime_metrics.py` and `MetricsPlugin` are the single diagnostic counter
+  path; there are no duplicate runtime counters. Active means
   at least one spike in the window, silent means zero spikes, and saturated means
   a per-neuron rate at or above the configured saturation rate (0.5 by default).
   `population_homeostasis.py` optionally applies a slow, bounded shared current
@@ -102,3 +109,16 @@ characters remain needed.
 
 See [training](TRAINING.md), [tasks](TASKS.md), and the
 [affective-state reference](AFFECTIVE_STATE_SPEC.md).
+
+## Composition boundaries
+
+`NetworkCore` owns vectorised LIF neurons, sparse synapses, pending current,
+tick/reset, and snapshots. `NetworkFactory` constructs that core and the runtime
+services in one `NetworkBundle`; neither the bundle nor `SpikingRuntime` keeps
+second neuron or synapse aliases. `BackgroundDrive` owns its stochastic-drive
+configuration and state.
+
+`SpikingRuntime` is the composition root and owns the tick loop. `RuntimeSession`
+owns lifecycle, isolation, and weight merging. `InputRunner` owns raw episode
+execution and training. Task adapters use runtime APIs rather than exposing
+runtime internals through the `ConversationAgent` facade.

@@ -56,7 +56,7 @@ def test_background_drive_is_seeded_and_vectorized() -> None:
         background_rate=0.5,
         background_current=0.4,
     )
-    current = np.zeros(first.neurons.count)
+    current = np.zeros(first.network.neurons.count)
     first_spikes = [first.step(current) for _ in range(8)]
     second_spikes = [second.step(current) for _ in range(8)]
     np.testing.assert_array_equal(first_spikes, second_spikes)
@@ -72,8 +72,10 @@ def test_normal_output_pathways_are_not_zeroed() -> None:
         seed=22,
     )
     output = runtime.layout.slice(Population.OUTPUT_CHAR)
-    incoming = (runtime.synapses.target >= output.start) & (runtime.synapses.target < output.stop)
-    assert np.all(runtime.synapses.weight[incoming] != 0.0)
+    incoming = (runtime.network.synapses.target >= output.start) & (
+        runtime.network.synapses.target < output.stop
+    )
+    assert np.all(runtime.network.synapses.weight[incoming] != 0.0)
 
 
 def test_boundary_current_is_neural_and_not_a_semantic_feature() -> None:
@@ -157,7 +159,7 @@ def test_session_rejects_input_frames_outside_boundaries() -> None:
 
 def test_agent_applies_boundary_policy_and_captures_execution_snapshot() -> None:
     agent = ConversationAgent(AgentConfig(seed=3, persistent_working_memory=True))
-    agent.response_session.policy = SessionPolicy(
+    agent.runtime.response_session.policy = SessionPolicy(
         reset_readout=True,
         reset_neuron_state=True,
         reset_synaptic_activity=True,
@@ -165,24 +167,24 @@ def test_agent_applies_boundary_policy_and_captures_execution_snapshot() -> None
         persist_working_memory=False,
         persist_plasticity_eligibility=False,
     )
-    agent.network.neurons.voltage[0] = 0.7
-    agent.network.reset_synaptic_activity()
+    agent.runtime.network.neurons.voltage[0] = 0.7
+    agent.runtime.network.reset_synaptic_activity()
     agent.working_memory.state[0] = 0.8
     agent.affect.valence = 0.9
-    agent.plasticity.eligibility[0] = 0.6
+    agent.runtime.plasticity.eligibility[0] = 0.6
 
     agent._start_response_session()
-    saved = agent.response_session.snapshot
+    saved = agent.runtime.response_session.snapshot
     assert saved is not None
     assert saved.neuron_voltage[0] == 0.0
     assert saved.working_memory is not None
     assert isinstance(saved.working_memory, WorkingMemory)
     assert saved.working_memory.state[0] == 0.0
     assert agent.affect.valence == 0.0
-    assert agent.plasticity.eligibility[0] == 0.0
+    assert agent.runtime.plasticity.eligibility[0] == 0.0
     assert agent.last_execution_snapshot is not None
-    agent.response_session.begin_response()
-    agent.response_session.abort()
+    agent.runtime.response_session.begin_response()
+    agent.runtime.response_session.abort()
 
 
 def test_missing_response_eos_aborts_the_agent_session() -> None:
@@ -191,7 +193,7 @@ def test_missing_response_eos_aborts_the_agent_session() -> None:
     response = agent.generate_response(Action.ANSWER, max_tokens=0)
 
     assert not response.stopped_on_eos
-    assert agent.response_session.state.value == "exhausted"
+    assert agent.runtime.response_session.state.value == "exhausted"
     assert agent.last_execution_snapshot is not None
 
 
@@ -200,8 +202,8 @@ def test_agent_input_presentation_closes_before_response() -> None:
 
     agent.respond("hello")
 
-    assert agent.response_session.input_active is False
-    assert agent.response_session.state.value in {"complete", "idle"}
+    assert agent.runtime.response_session.input_active is False
+    assert agent.runtime.response_session.state.value in {"complete", "idle"}
 
 
 def test_zero_token_limit_is_explicit_exhaustion_without_network_ticks() -> None:
@@ -212,8 +214,8 @@ def test_zero_token_limit_is_explicit_exhaustion_without_network_ticks() -> None
     assert response.tokens == ()
     assert response.ticks == 0
     assert not response.stopped_on_eos
-    assert agent.network.tick == 0
-    assert agent.response_session.state.value == "exhausted"
+    assert agent.runtime.network.tick == 0
+    assert agent.runtime.response_session.state.value == "exhausted"
 
 
 def test_reward_modulated_stdp_changes_only_selected_targets() -> None:
@@ -236,57 +238,57 @@ def test_reward_modulated_stdp_changes_only_selected_targets() -> None:
 
 def test_isolated_sessions_do_not_share_execution_state_and_merge_explicitly() -> None:
     agent = ConversationAgent(AgentConfig(seed=17, max_thinking_ticks=1))
-    before_weights = agent.network.synapses.weight.copy()
-    before_voltage = agent.network.neurons.voltage.copy()
+    before_weights = agent.runtime.network.synapses.weight.copy()
+    before_voltage = agent.runtime.network.neurons.voltage.copy()
 
     first, first_execution = agent.train_response_isolated("hello", Action.ANSWER, merge=False)
     second, second_execution = agent.train_response_isolated("hello", Action.REVISE, merge=False)
 
     assert first.action in tuple(Action)
     assert second.action in tuple(Action)
-    np.testing.assert_array_equal(agent.network.synapses.weight, before_weights)
-    np.testing.assert_array_equal(agent.network.neurons.voltage, before_voltage)
+    np.testing.assert_array_equal(agent.runtime.network.synapses.weight, before_weights)
+    np.testing.assert_array_equal(agent.runtime.network.neurons.voltage, before_voltage)
     assert first_execution.updates
     assert second_execution.updates
     assert first_execution is not second_execution
 
-    first_execution.merge_into(agent.network.synapses.weight, ConflictPolicy.REJECT)
-    after_first = agent.network.synapses.weight.copy()
-    second_execution.merge_into(agent.network.synapses.weight, ConflictPolicy.SUM)
-    assert not np.array_equal(agent.network.synapses.weight, before_weights)
-    assert not np.array_equal(agent.network.synapses.weight, after_first)
+    first_execution.merge_into(agent.runtime.network.synapses.weight, ConflictPolicy.REJECT)
+    after_first = agent.runtime.network.synapses.weight.copy()
+    second_execution.merge_into(agent.runtime.network.synapses.weight, ConflictPolicy.SUM)
+    assert not np.array_equal(agent.runtime.network.synapses.weight, before_weights)
+    assert not np.array_equal(agent.runtime.network.synapses.weight, after_first)
 
 
 def test_isolated_response_does_not_merge_non_weight_state() -> None:
     agent = ConversationAgent(AgentConfig(seed=18, max_thinking_ticks=1))
-    before_tick = agent.network.tick
+    before_tick = agent.runtime.network.tick
     before_snapshot = agent.debug_snapshot()
 
     decision, execution = agent.respond_isolated("hello", merge=True)
 
     assert decision.action in tuple(Action)
-    assert agent.network.tick == before_tick
+    assert agent.runtime.network.tick == before_tick
     assert agent.debug_snapshot() == before_snapshot
     assert execution.updates == ()
 
 
 def test_isolated_execution_does_not_merge_by_default() -> None:
     agent = ConversationAgent(AgentConfig(seed=19, max_thinking_ticks=1))
-    before = agent.network.synapses.weight.copy()
+    before = agent.runtime.network.synapses.weight.copy()
 
     _, execution = agent.train_response_isolated("hello", Action.ANSWER)
 
     assert execution.updates
-    np.testing.assert_array_equal(agent.network.synapses.weight, before)
+    np.testing.assert_array_equal(agent.runtime.network.synapses.weight, before)
 
 
 def test_isolated_execution_copies_output_arbitration_policy() -> None:
     agent = ConversationAgent(AgentConfig(seed=20))
-    policy = agent.output_readout.arbitration
+    policy = agent.runtime.output_readout.arbitration
 
     def mutate_policy(isolated: ConversationAgent) -> None:
-        assert isolated.output_readout.arbitration is not policy
-        isolated.output_readout.arbitration.action_priority = 99
+        assert isolated.runtime.output_readout.arbitration is not policy
+        isolated.runtime.output_readout.arbitration.action_priority = 99
 
     agent.execute_isolated(mutate_policy)
 

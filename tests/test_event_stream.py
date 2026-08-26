@@ -98,7 +98,7 @@ def test_early_timing_is_open_by_default_but_can_be_configured() -> None:
 
 def test_configured_event_rewards_are_consumed_by_plasticity_and_ledger() -> None:
     agent = ConversationAgent(AgentConfig(seed=12))
-    agent.plasticity.eligibility.fill(1.0)
+    agent.runtime.plasticity.eligibility.fill(1.0)
     config = EventStreamConfig(
         correct_reward=2.0,
         incorrect_reward=-2.0,
@@ -112,13 +112,13 @@ def test_configured_event_rewards_are_consumed_by_plasticity_and_ledger() -> Non
         (event("b", 0), event("<EOS>", 1)),
         config=config,
     )
-    before = agent.network.synapses.weight.copy()
+    before = agent.runtime.network.synapses.weight.copy()
 
     prediction_error = agent.apply_event_stream_reward(report)
 
     assert prediction_error == report.total_reward
     assert agent.reward_ledger == report.records
-    assert not np.array_equal(agent.network.synapses.weight, before)
+    assert not np.array_equal(agent.runtime.network.synapses.weight, before)
 
 
 def test_event_reward_outcomes_remain_distinct_in_the_consumed_ledger() -> None:

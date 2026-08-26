@@ -75,3 +75,9 @@ Formatting and import/lint rules are style gates supplied by Ruff.
 
 See [architecture](ARCHITECTURE.md) and [training](TRAINING.md) for the current
 implemented boundary.
+
+Task adapters own encoding, session boundaries, readout, and reward semantics.
+They compose the shared runtime and must not construct or step a second network.
+New external stimulation should implement the `Drive` protocol; diagnostics,
+homeostasis, and learning observations should implement a scheduled
+`NetworkPlugin`.

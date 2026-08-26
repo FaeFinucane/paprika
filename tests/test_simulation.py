@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from continual_agent.simulation import LIFNeurons, SparseSynapses, SpikingNetwork
+from continual_agent.simulation import LIFNeurons, NetworkCore, SparseSynapses
 
 
 def test_lif_neuron_spikes_and_resets() -> None:
@@ -35,8 +35,8 @@ def test_sparse_synapses_transmit_only_from_active_sources() -> None:
 
 
 def test_random_network_is_reproducible() -> None:
-    first = SpikingNetwork.random(neuron_count=20, seed=42, connection_probability=0.2)
-    second = SpikingNetwork.random(neuron_count=20, seed=42, connection_probability=0.2)
+    first = NetworkCore.random(neuron_count=20, seed=42, connection_probability=0.2)
+    second = NetworkCore.random(neuron_count=20, seed=42, connection_probability=0.2)
     external = np.zeros(20)
     external[0] = 2.0
 
@@ -49,14 +49,13 @@ def test_random_network_is_reproducible() -> None:
 
 
 def test_recurrent_network_remains_finite() -> None:
-    network = SpikingNetwork.random(neuron_count=50, seed=7, connection_probability=0.05)
+    network = NetworkCore.random(neuron_count=50, seed=7, connection_probability=0.05)
 
     for _ in range(200):
         network.step(np.zeros(50))
 
     assert np.isfinite(network.neurons.voltage).all()
     assert np.isfinite(network.synapses.weight).all()
-    assert len(network.spike_history) == 200
 
 
 def test_shape_mismatches_are_rejected() -> None:
