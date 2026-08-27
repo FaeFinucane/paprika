@@ -52,10 +52,10 @@ while allowing the same output to fire again after release.
 `train_response_events(act, target_events)` presents the action context once,
 then teacher-presents each target character or `<EOS>` on the existing
 `OUTPUT_CHAR` population. `SpikingCharacterDecoder.align_next_token()` updates
-the context-to-first-token projection, while `align_recurrent_token()` updates
-existing recurrent edges into later target populations. Decoded characters are
-not fed back through external `INPUT`, and no new language-state or feedback
-population is created.
+the context-to-first-token projection, while hidden-to-output alignment updates
+the existing readout pathway. Decoded characters are not fed back through
+external `INPUT` or output reafference, and no new language-state population is
+created.
 
 Implemented in `src/continual_agent/agent/conversation_agent.py` and
 `src/continual_agent/language/spiking_decoder.py`.
@@ -136,3 +136,10 @@ eligibility and weight updates, while delayed reward is applied after readout
 evaluation. Supervised training remains an explicit runtime protocol rather than
 a second network implementation. The runtime keeps aggregate diagnostics and
 reusable spike buffers, not a historical spike sequence.
+
+The synthetic delayed-copy experiment uses the clearly named
+`train_delayed_copy_baseline()` production-runtime path. For each labelled
+symbol it clips a structural update to existing HIDDEN->HIDDEN edges sourced by
+that symbol's hidden feature group, allowing state to persist across the input
+boundary while normal hidden-to-output teacher alignment remains active. It
+does not create a second network or retain a host-side symbol queue.

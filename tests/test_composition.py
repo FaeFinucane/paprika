@@ -7,8 +7,10 @@ from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.plugins import NetworkContext
 from continual_agent.agent.runtime_session import RuntimeSession
+from continual_agent.agent.session import InputSignal
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.simulation import LIFNeurons, NetworkCore, SparseSynapses
+from continual_agent.simulation.population_layout import Population
 
 
 def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
@@ -85,3 +87,61 @@ def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     assert config == before
     assert not hasattr(runtime, "_diagnostic_ticks")
     assert runtime.metrics.ticks == 0
+
+
+def test_character_output_is_terminal_and_hidden_recurrence_is_exposed() -> None:
+    runtime = SpikingRuntime(
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            connection_probability=1.0,
+            seed=8,
+        )
+    )
+    output = runtime.layout.slice(Population.OUTPUT_CHAR)
+    assert not np.any(
+        np.isin(runtime.network.synapses.source, np.arange(output.start, output.stop))
+    )
+    recurrence = runtime.hidden_recurrent_edge_indices
+    hidden = runtime.layout.slice(Population.HIDDEN)
+    assert recurrence.size > 0
+    assert np.all(
+        np.isin(runtime.network.synapses.source[recurrence], np.arange(hidden.start, hidden.stop))
+    )
+    assert np.all(
+        np.isin(runtime.network.synapses.target[recurrence], np.arange(hidden.start, hidden.stop))
+    )
+
+
+def test_delayed_copy_baseline_depends_on_hidden_retention() -> None:
+    config = NetworkConfig(
+        input_features=4,
+        hidden_neurons=8,
+        output_tokens=("<EOS>", "A"),
+        neurons_per_token=1,
+        connection_probability=1.0,
+        seed=8,
+    )
+    frame = np.array([0.0, 0.0, 5.0, 0.0])
+    ordinary = SpikingRuntime(config)
+    retention = SpikingRuntime(config)
+    events = (InputSignal.INPUT_BEGIN, (frame, "A"), InputSignal.INPUT_END)
+    ordinary.train_input_events(events)
+    retention.train_delayed_copy_baseline(events)
+    indices = retention.hidden_recurrent_edge_indices
+    group = retention.hidden_feature_groups[2] - retention.input_features
+    source = retention.network.synapses.source[indices] - retention.input_features
+    target = retention.network.synapses.target[indices] - retention.input_features
+    active_group_edges = indices[np.isin(source, group) & np.isin(target, group)]
+    other_edges = indices[~(np.isin(source, group) & np.isin(target, group))]
+    assert active_group_edges.size > 0
+    assert np.any(
+        retention.network.synapses.weight[active_group_edges]
+        != ordinary.network.synapses.weight[active_group_edges]
+    )
+    np.testing.assert_array_equal(
+        retention.network.synapses.weight[other_edges],
+        ordinary.network.synapses.weight[other_edges],
+    )

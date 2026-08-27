@@ -44,7 +44,7 @@ class SpikingRuntime:
     hidden_feature_groups: Any
     direct_input_output_edge_indices: Any
     hidden_output_edge_indices: Any
-    recurrent_event_edge_indices: Any
+    hidden_recurrent_edge_indices: Any
     token_input_edge_indices: Any
     affect_edge_indices: Any
     affect_action_edge_indices: Any
@@ -103,7 +103,7 @@ class SpikingRuntime:
         pathways = {
             "direct_input_output": self.direct_input_output_edge_indices,
             "hidden_output": self.hidden_output_edge_indices,
-            "recurrent_event": self.recurrent_event_edge_indices,
+            "hidden_recurrent": self.hidden_recurrent_edge_indices,
         }
         return {
             name: {
@@ -183,6 +183,17 @@ class SpikingRuntime:
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> None:
         self.trainer.train_supervised(events, current_builder=current_builder)
+
+    def train_delayed_copy_baseline(
+        self,
+        events: Iterable[InputSignal | tuple[np.ndarray, str]],
+        *,
+        current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
+    ) -> None:
+        """Run the bounded supervised delayed-copy retention baseline."""
+        self.trainer.train_supervised(
+            events, current_builder=current_builder, hidden_retention=True
+        )
 
     def train_reward_modulated_events(
         self, events: Iterable[InputSignal | tuple[np.ndarray, str]]

@@ -23,6 +23,7 @@ class InputRunner:
         events: Iterable[InputSignal | tuple[np.ndarray, str]],
         *,
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
+        hidden_retention: bool = False,
     ) -> None:
         runtime = self.runtime
         self._prepare()
@@ -50,6 +51,8 @@ class InputRunner:
                     raise ValueError("labelled raw input frames require a known string target")
                 runtime.step(build(frame))
                 runtime._apply_supervised_target(frame, target)
+                if hidden_retention:
+                    self._apply_delayed_copy_baseline(frame)
                 teacher = build(np.zeros(runtime.input_features))
                 teacher[runtime.layout.subgroup(Population.OUTPUT_CHAR, target)] += 3.0
                 runtime.step(teacher)
@@ -63,6 +66,26 @@ class InputRunner:
                 raise ValueError("training input must contain INPUT_BEGIN and INPUT_END boundaries")
         finally:
             self._reset()
+
+    def _apply_delayed_copy_baseline(self, frame: np.ndarray) -> None:
+        """Strengthen existing active-group recurrence for delayed copy."""
+        runtime = self.runtime
+        feature = int(np.argmax(np.maximum(frame, 0.0)))
+        group = runtime.hidden_feature_groups[feature] - runtime.input_features
+        edges = runtime.hidden_recurrent_edge_indices
+        sources = runtime.network.synapses.source[edges] - runtime.input_features
+        targets = runtime.network.synapses.target[edges] - runtime.input_features
+        selected = edges[np.isin(sources, group) & np.isin(targets, group)]
+        if selected.size == 0:
+            return
+        # Use the presented feature as the bounded structural teaching signal;
+        # recurrence is retained even when the sparse hidden group is quiet.
+        signal = float(np.clip(np.maximum(frame, 0.0).mean(), 0.0, 1.0))
+        update = np.full(selected.size, runtime.plasticity.learning_rate * signal)
+        runtime.network.synapses.weight[selected] = np.clip(
+            runtime.network.synapses.weight[selected] + update, -1.0, 1.0
+        )
+        runtime.apply_ablation_mask()
 
     def train_reward_modulated(
         self, events: Iterable[InputSignal | tuple[np.ndarray, str]]

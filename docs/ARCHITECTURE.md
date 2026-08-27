@@ -48,8 +48,13 @@ duplicated offsets.
   populations project to action populations through ordinary recurrent synapses;
   there is no host-side affect-to-action arithmetic.
 - Input, hidden, affect, and action activity can project to character output
-  populations through the sparse graph. The hidden region is recurrent space,
-  not a separate language module.
+  populations through the sparse graph. `OUTPUT_CHAR` is terminal: it has no
+  outgoing edges, including base-random edges, and output reafference is
+  deferred. The hidden region is recurrent space, not a separate language
+  module.
+- `hidden_recurrent_edge_indices` is the explicit HIDDEN->HIDDEN pathway used
+  by recurrent diagnostics, ablation, and delayed-copy retention training.
+  `hidden_output_edge_indices` is a separate teacher/readout pathway.
 - `EventReadout` observes spike frames from action or character populations.
   Named subgroup spike counts form candidates, with one spike sufficient by
   default. One output is latched at a time; its subgroup suppresses repeated
@@ -113,10 +118,10 @@ structural rewiring, individual adaptive thresholds, and network scaling are
 deferred. Homeostasis is opt-in and population-level only, so its defaults do
 not alter existing behavior.
 
-The character path supports teacher-presented ordered events through existing
-recurrence, including EOS, but this should not be described as full sequence
-learning. Stronger dedicated tests for exact learned strings and repeated
-characters remain needed.
+The character path supports teacher-presented ordered events through hidden
+state and existing HIDDEN->HIDDEN recurrence, including EOS, but this should
+not be described as full sequence learning. Stronger dedicated tests for exact
+learned strings and repeated characters remain needed.
 
 See [training](TRAINING.md), [tasks](TASKS.md), and the
 [affective-state reference](AFFECTIVE_STATE_SPEC.md).

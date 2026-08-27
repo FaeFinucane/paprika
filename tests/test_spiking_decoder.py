@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
+from continual_agent.agent.session import InputSignal
 from continual_agent.cognition.readout import Action
 from continual_agent.language.spiking_decoder import SpikingCharacterDecoder
 from continual_agent.simulation.population_layout import Population, PopulationLayout
@@ -32,22 +33,24 @@ def test_local_teacher_alignment_changes_token_synapses() -> None:
     assert not np.array_equal(before, after)
 
 
-def test_event_teacher_updates_existing_recurrent_transition_edges() -> None:
+def test_supervised_teacher_updates_existing_hidden_output_edges() -> None:
     agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
-    edges = agent.runtime.recurrent_event_edge_indices
+    edges = agent.runtime.hidden_output_edge_indices
     target = agent.runtime.layout.subgroup(Population.OUTPUT_CHAR, "a")
     selected = edges[
         np.isin(agent.runtime.network.synapses.target[edges], np.arange(target.start, target.stop))
     ]
     before = agent.runtime.network.synapses.weight[selected].copy()
 
-    agent.train_response_events(Action.ANSWER, ("m", "a"))
+    frame = np.zeros(agent.config.input_features)
+    frame[2] = 5.0
+    agent.runtime.train_input_events((InputSignal.INPUT_BEGIN, (frame, "a"), InputSignal.INPUT_END))
 
     assert selected.size
     assert np.any(agent.runtime.network.synapses.weight[selected] != before)
 
 
-def test_repeated_event_has_a_recurrent_character_path_without_input_feedback() -> None:
+def test_repeated_event_has_no_output_feedback() -> None:
     agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
     currents: list[np.ndarray] = []
     original_step = agent.runtime.network.step
@@ -57,27 +60,15 @@ def test_repeated_event_has_a_recurrent_character_path_without_input_feedback() 
         return original_step(current)
 
     agent.runtime.network.step = step
-    m = agent.runtime.layout.subgroup(Population.OUTPUT_CHAR, "m")
-    m_edges = agent.runtime.recurrent_event_edge_indices[
-        np.isin(
-            agent.runtime.network.synapses.target[agent.runtime.recurrent_event_edge_indices],
-            np.arange(m.start, m.stop),
-        )
-    ]
-    transition_edges = m_edges[
-        np.isin(agent.runtime.network.synapses.source[m_edges], np.arange(m.start, m.stop))
-    ]
-    before = agent.runtime.network.synapses.weight[m_edges].copy()
-    transition_before = agent.runtime.network.synapses.weight[transition_edges].copy()
     agent.train_response_events(Action.ANSWER, ("m", "m", "<EOS>"))
 
     assert currents
     assert np.any(currents[0][: agent.config.input_features])
     assert all(not np.any(current[: agent.config.input_features]) for current in currents[1:])
-    assert m_edges.size
-    assert np.any(agent.runtime.network.synapses.weight[m_edges] != before)
-    assert transition_edges.size
-    assert np.any(agent.runtime.network.synapses.weight[transition_edges] != transition_before)
+    output = agent.runtime.layout.slice(Population.OUTPUT_CHAR)
+    assert not np.any(
+        np.isin(agent.runtime.network.synapses.source, np.arange(output.start, output.stop))
+    )
 
 
 def test_spiking_response_has_bounded_output_and_eos_control() -> None:

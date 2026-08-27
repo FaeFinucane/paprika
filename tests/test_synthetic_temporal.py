@@ -199,7 +199,7 @@ def test_production_runtime_exposes_the_pathways_used_by_controls() -> None:
     agent = ConversationAgent(AgentConfig(input_features=4, language_alphabet=("A", "B"), seed=1))
     assert isinstance(agent.runtime, SpikingRuntime)
     assert agent.runtime.token_input_edge_indices.size > 0
-    assert agent.runtime.recurrent_event_edge_indices.size > 0
+    assert agent.runtime.hidden_recurrent_edge_indices.size > 0
     assert agent.runtime.hidden_output_edge_indices.size > 0
     assert agent.runtime.direct_input_output_edge_indices.size > 0
 
@@ -229,7 +229,7 @@ def test_synthetic_production_path_composes_the_shared_runtime() -> None:
 def test_direct_ablation_mask_survives_training() -> None:
     runtime = _make_runtime(small_config(), seed=7)
     edges = np.concatenate(
-        (runtime.token_input_edge_indices.ravel(), runtime.recurrent_event_edge_indices)
+        (runtime.token_input_edge_indices.ravel(), runtime.hidden_recurrent_edge_indices)
     )
     runtime.ablate_edges(edges)
     runtime.train_input_events(

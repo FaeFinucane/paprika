@@ -168,7 +168,7 @@ class TemporalExperimentResult:
                 "firing_rate": float(np.mean([x.firing_rate for x in trials])),
                 "output_event_rate": float(np.mean([x.output_event_rate for x in trials])),
             }
-            for pathway in ("direct_input_output", "hidden_output", "recurrent_event"):
+            for pathway in ("direct_input_output", "hidden_output", "hidden_recurrent"):
                 metrics[f"weight_{pathway}"] = float(
                     np.mean([(x.pathway_weight_change or {}).get(pathway, 0.0) for x in trials])
                 )
@@ -250,7 +250,7 @@ def _train(
         return 0.0, 0.0, {}, {}
     reward = 0.0
     eligibility_change = 0.0
-    pathway_change = {"direct_input_output": 0.0, "hidden_output": 0.0, "recurrent_event": 0.0}
+    pathway_change = {"direct_input_output": 0.0, "hidden_output": 0.0, "hidden_recurrent": 0.0}
     pathway_eligibility = {name: 0.0 for name in pathway_change}
     reward_config = RewardSchedule.for_stage(config.reward_stage).event_config(
         patience_window=config.patience_window
@@ -262,7 +262,10 @@ def _train(
             InputSignal.INPUT_END,
         ]
         if kind is AgentKind.SUPERVISED:
-            agent.train_input_events(events)
+            if condition is CopyCondition.DELAYED:
+                agent.train_delayed_copy_baseline(events)
+            else:
+                agent.train_input_events(events)
         else:
             before_weights = agent.network.synapses.weight.copy()
 
@@ -300,7 +303,7 @@ def _train(
             for name, indices in (
                 ("direct_input_output", agent.direct_input_output_edge_indices),
                 ("hidden_output", agent.hidden_output_edge_indices),
-                ("recurrent_event", agent.recurrent_event_edge_indices),
+                ("hidden_recurrent", agent.hidden_recurrent_edge_indices),
             ):
                 pathway_eligibility[name] += float(
                     np.abs(agent.plasticity.eligibility[indices]).sum()
@@ -312,7 +315,7 @@ def _train(
             for name, indices in (
                 ("direct_input_output", agent.direct_input_output_edge_indices),
                 ("hidden_output", agent.hidden_output_edge_indices),
-                ("recurrent_event", agent.recurrent_event_edge_indices),
+                ("hidden_recurrent", agent.hidden_recurrent_edge_indices),
             ):
                 pathway_change[name] += float(np.abs(changed[indices]).sum())
             agent.plasticity.reset_traces()
@@ -354,7 +357,7 @@ def run_temporal_experiment(
                         stdp_background=kind is AgentKind.REWARD_MODULATED_STDP,
                     )
                     if control is Control.RECURRENT_ABLATION:
-                        agent.ablate_edges(agent.hidden_output_edge_indices)
+                        agent.ablate_edges(agent.hidden_recurrent_edge_indices)
                     if control is Control.DIRECT_INPUT_OUTPUT_ABLATION:
                         agent.ablate_edges(agent.direct_input_output_edge_indices)
                     events, labelled = _stream(config, sequence)

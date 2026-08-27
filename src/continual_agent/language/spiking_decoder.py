@@ -100,7 +100,7 @@ class SpikingCharacterDecoder:
         synapses.weight[selected_edges] += update[:, None] / self.neurons_per_token
         synapses.weight[selected_edges] = np.clip(synapses.weight[selected_edges], -1.0, 1.0)
 
-    def align_recurrent_token(
+    def align_hidden_output_token(
         self,
         synapses: SparseSynapses,
         edge_indices: np.ndarray,
@@ -108,7 +108,7 @@ class SpikingCharacterDecoder:
         target: str,
         layout: PopulationLayout,
     ) -> None:
-        """Strengthen existing recurrent edges into the teacher event.
+        """Strengthen existing hidden-to-output edges into the teacher event.
 
         ``source`` is the activity observed in the network immediately before
         the teacher event.  The edge list is supplied by the network owner so

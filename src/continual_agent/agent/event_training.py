@@ -37,9 +37,9 @@ class EventTrainingMixin:
                     context,
                     token,
                 )
-            self.language.align_recurrent_token(
+            self.language.align_hidden_output_token(
                 self.runtime.network.synapses,
-                self.runtime.recurrent_event_edge_indices,
+                self.runtime.hidden_output_edge_indices,
                 source_activity,
                 token,
                 layout=self.runtime.layout,

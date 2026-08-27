@@ -27,6 +27,7 @@ from continual_agent.plasticity.stdp import RewardModulatedSTDP
 from continual_agent.simulation.core import NetworkCore
 from continual_agent.simulation.neurons import LIFNeurons
 from continual_agent.simulation.population_layout import Population, PopulationLayout
+from continual_agent.simulation.synapses import SparseSynapses
 from continual_agent.simulation.weight_initialization import (
     WeightInitializationConfig,
     WeightInitializer,
@@ -59,7 +60,7 @@ class NetworkBundle:
     direct_input_output_edge_indices: np.ndarray
     hidden_output_edge_indices: np.ndarray
     token_input_edge_indices: np.ndarray
-    recurrent_event_edge_indices: np.ndarray
+    hidden_recurrent_edge_indices: np.ndarray
 
 
 @dataclass
@@ -134,6 +135,16 @@ class NetworkConfig:
         initializer = WeightInitializer(self.seed, self.weight_initialization)
         c = initializer.config
         synapses = initializer.random_synapses(total, self.connection_probability)
+        # Character neurons are terminal readout populations.  Filter the
+        # random graph before appending projections so this invariant covers
+        # accidental base-random contacts as well as explicit pathways.
+        valid = synapses.source < char_start
+        synapses = SparseSynapses(
+            synapses.source[valid],
+            synapses.target[valid],
+            synapses.weight[valid],
+            total,
+        )
         initial_edges = synapses.weight.size
         hidden_groups = tuple(
             np.asarray(g, dtype=np.int64)
@@ -241,6 +252,12 @@ class NetworkConfig:
             HomeostasisPlugin(homeostasis),
             PlasticityPlugin(plasticity),
         ]
+        hidden_recurrent = np.flatnonzero(
+            (synapses.source >= input_features)
+            & (synapses.source < affect_start)
+            & (synapses.target >= input_features)
+            & (synapses.target < affect_start)
+        )
         return NetworkBundle(
             input_features,
             output_tokens,
@@ -266,7 +283,7 @@ class NetworkConfig:
             direct,
             hidden,
             direct.reshape(input_features, len(output_tokens), neurons_per_token),
-            np.flatnonzero((synapses.source >= input_features) & (synapses.target >= char_start)),
+            hidden_recurrent,
         )
 
     @staticmethod
