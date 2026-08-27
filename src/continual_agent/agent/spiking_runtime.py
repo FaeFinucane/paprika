@@ -11,7 +11,13 @@ import numpy as np
 from continual_agent.agent.drives import ArrayDrive, BackgroundDrive
 from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.network_config import NetworkConfig
-from continual_agent.agent.plugins import MetricsPlugin, NetworkContext, NetworkPlugin
+from continual_agent.agent.plugins import (
+    HomeostasisPlugin,
+    MetricsPlugin,
+    NetworkContext,
+    NetworkPlugin,
+    PlasticityPlugin,
+)
 from continual_agent.agent.population_homeostasis import PopulationHomeostasis
 from continual_agent.agent.runtime_metrics import RuntimeMetrics
 from continual_agent.agent.runtime_session import RuntimeSession
@@ -24,7 +30,10 @@ from continual_agent.agent.session import (
 from continual_agent.cognition.readout import EventReadout, OutputEvent
 from continual_agent.plasticity.stdp import RewardModulatedSTDP
 from continual_agent.simulation.core import NetworkCore
+from continual_agent.simulation.neurons import LIFNeurons
 from continual_agent.simulation.population_layout import Population, PopulationLayout
+from continual_agent.simulation.synapses import SparseSynapses
+from continual_agent.simulation.weight_initialization import WeightInitializer
 
 T = TypeVar("T")
 
@@ -59,32 +68,193 @@ class SpikingRuntime:
     trainer: InputRunner
 
     def __init__(self, config: NetworkConfig) -> None:
-        # This seems ridiculously confusing. NetworkBundle magically being written to properties here?
-        # Why not just have NetworkConfig.build() -> SpikingRuntime?
-        bundle = config.build()
-        self.layout = bundle.layout
-        self.network = bundle.network
-        self.output_readout = bundle.output_readout
-        self.edge_enabled = bundle.edge_enabled
-        self.plasticity = bundle.plasticity
-        self.response_session = bundle.response_session
-        self.metrics = bundle.metrics
-        self.metrics_plugin = bundle.metrics_plugin
-        self.homeostasis = bundle.homeostasis
-        self.external_drive = bundle.external_drive
-        self.background_drive = bundle.background_drive
-        self.plugins = bundle.plugins
-        self._context = bundle.context
-        self.input_features = bundle.input_features
-        self.output_tokens = bundle.output_tokens
-        self.neurons_per_token = bundle.neurons_per_token
-        self.hidden_feature_groups = bundle.hidden_feature_groups
-        self.direct_input_output_edge_indices = bundle.direct_input_output_edge_indices
-        self.hidden_output_edge_indices = bundle.hidden_output_edge_indices
-        self.hidden_recurrent_edge_indices = bundle.hidden_recurrent_edge_indices
-        self.token_input_edge_indices = bundle.token_input_edge_indices
-        self.affect_edge_indices = bundle.affect_edge_indices
-        self.affect_action_edge_indices = bundle.affect_action_edge_indices
+        input_features = config.input_features
+        hidden_neurons = config.hidden_neurons
+        output_tokens = config.output_tokens
+        assert output_tokens is not None
+        neurons_per_token = config.neurons_per_token
+        action_names = config.action_names
+        neurons_per_action = config.neurons_per_action
+        affect_names = config.affect_names
+        neurons_per_affect = config.neurons_per_affect
+        affect_start = input_features + hidden_neurons
+        action_start = affect_start + len(affect_names) * neurons_per_affect
+        char_start = action_start + len(action_names) * neurons_per_action
+        total = char_start + len(output_tokens) * neurons_per_token
+        layout = PopulationLayout(
+            input_count=input_features,
+            hidden_count=hidden_neurons,
+            affect_count=action_start - affect_start,
+            action_count=char_start - action_start,
+            char_count=total - char_start,
+            affect_subgroups={
+                n: slice(
+                    affect_start + i * neurons_per_affect,
+                    affect_start + (i + 1) * neurons_per_affect,
+                )
+                for i, n in enumerate(affect_names)
+            },
+            action_subgroups={
+                n: slice(
+                    action_start + i * neurons_per_action,
+                    action_start + (i + 1) * neurons_per_action,
+                )
+                for i, n in enumerate(action_names)
+            },
+            char_subgroups={
+                n: slice(
+                    char_start + i * neurons_per_token, char_start + (i + 1) * neurons_per_token
+                )
+                for i, n in enumerate(output_tokens)
+            },
+        )
+        neurons = LIFNeurons(total, dt=1.0, tau_membrane=5.0, threshold=1.0, refractory_ticks=2)
+        initializer = WeightInitializer(config.seed, config.weight_initialization)
+        c = initializer.config
+        synapses = initializer.random_synapses(total, config.connection_probability)
+        explicit_pairs = np.concatenate(
+            (
+                *(
+                    np.stack(np.meshgrid(sources, targets, indexing="ij"), axis=-1).reshape(-1, 2)
+                    for sources, targets in (
+                        (np.arange(input_features), np.arange(input_features, affect_start)),
+                        (np.arange(input_features), np.arange(affect_start, action_start)),
+                        (np.arange(input_features), np.arange(action_start, char_start)),
+                        (np.arange(input_features), np.arange(char_start, total)),
+                        (np.arange(input_features, affect_start), np.arange(char_start, total)),
+                        (
+                            np.arange(affect_start, action_start),
+                            np.arange(action_start, char_start),
+                        ),
+                    )
+                ),
+            )
+        )
+        explicit = set(map(tuple, explicit_pairs.tolist()))
+        valid = np.array(
+            [
+                (int(source), int(target)) not in explicit and target < char_start
+                for source, target in zip(synapses.source, synapses.target)
+            ],
+            dtype=bool,
+        )
+        synapses = SparseSynapses(
+            synapses.source[valid], synapses.target[valid], synapses.weight[valid], total
+        )
+        hidden_groups = tuple(
+            np.asarray(g, dtype=np.int64)
+            for g in np.array_split(np.arange(input_features, affect_start), input_features)
+        )
+        for source, group in enumerate(hidden_groups):
+            initializer.bootstrap_input_hidden(
+                synapses, np.array([source]), group, f"input_hidden_bootstrap_{source}"
+            )
+        for index, seed in enumerate(c.population_projections):
+            if seed.source is Population.OUTPUT_CHAR:
+                raise ValueError("OUTPUT_CHAR cannot be a projection source")
+            source_bounds = layout.slice(seed.source)
+            target_bounds = layout.slice(seed.target)
+            for contact in range(seed.contacts):
+                initializer.population_projection(
+                    synapses,
+                    seed,
+                    np.arange(source_bounds.start, source_bounds.stop),
+                    np.arange(target_bounds.start, target_bounds.stop),
+                    f"population_projection_{index}_{contact}",
+                )
+
+        def projection(
+            name: str, sources: np.ndarray, targets: np.ndarray, mean: float, spread: float
+        ) -> np.ndarray:
+            return initializer.projection(synapses, name, sources, targets, mean, spread)
+
+        projection(
+            "input_action",
+            np.arange(input_features),
+            np.arange(action_start, char_start),
+            c.input_action_mean,
+            c.input_action_spread,
+        )
+        affect_edges = projection(
+            "input_affect",
+            np.arange(input_features),
+            np.arange(affect_start, action_start),
+            c.input_affect_mean,
+            c.input_affect_spread,
+        )
+        affect_indices = affect_edges.reshape(
+            input_features, len(affect_names), neurons_per_affect
+        ).transpose(1, 0, 2)
+        affect_action_edges = synapses.weight.size
+        projection(
+            "affect_action",
+            np.arange(affect_start, action_start),
+            np.arange(action_start, char_start),
+            c.affect_action_mean,
+            c.affect_action_spread,
+        )
+        affect_action_indices = np.arange(affect_action_edges, synapses.weight.size)
+        projection(
+            "recurrent_output",
+            np.arange(char_start, total),
+            np.arange(char_start, total),
+            c.recurrent_output_mean,
+            c.recurrent_output_spread,
+        )
+        direct = projection(
+            "direct_output",
+            np.arange(input_features),
+            np.arange(char_start, total),
+            c.direct_output_mean,
+            c.direct_output_spread,
+        )
+        hidden = projection(
+            "hidden_output",
+            np.arange(input_features, affect_start),
+            np.arange(char_start, total),
+            c.hidden_output_mean,
+            c.hidden_output_spread,
+        )
+        network = NetworkCore(neurons, synapses)
+        self.input_features = input_features
+        self.output_tokens = output_tokens
+        self.neurons_per_token = neurons_per_token
+        self.layout = layout
+        self.network = network
+        self.output_readout = EventReadout(layout)
+        self.edge_enabled = np.ones(synapses.weight.size, dtype=bool)
+        self.plasticity = RewardModulatedSTDP(synapses, learning_rate=config.learning_rate)
+        self.response_session = ResponseSession(policy=config.session_policy)
+        self.metrics = RuntimeMetrics(layout)
+        self.homeostasis = PopulationHomeostasis(layout, config.homeostasis)
+        self.external_drive = ArrayDrive(total)
+        self.background_drive = BackgroundDrive(
+            total,
+            config.background_rate,
+            config.background_current,
+            initializer.seed_for("background"),
+        )
+        self.metrics_plugin = MetricsPlugin(self.metrics)
+        self.plugins: list[NetworkPlugin] = [
+            self.metrics_plugin,
+            HomeostasisPlugin(self.homeostasis),
+            PlasticityPlugin(self.plasticity),
+        ]
+        self._context = NetworkContext(network.tick, neurons.voltage, neurons.voltage)
+        self.hidden_feature_groups = hidden_groups
+        self.affect_edge_indices = affect_indices
+        self.affect_action_edge_indices = affect_action_indices
+        self.direct_input_output_edge_indices = direct
+        self.hidden_output_edge_indices = hidden
+        self.token_input_edge_indices = direct.reshape(
+            input_features, len(output_tokens), neurons_per_token
+        )
+        self.hidden_recurrent_edge_indices = np.flatnonzero(
+            (synapses.source >= input_features)
+            & (synapses.source < affect_start)
+            & (synapses.target >= input_features)
+            & (synapses.target < affect_start)
+        )
         self._ablation_lock = RLock()
         self.session = RuntimeSession(self)
         self.trainer = InputRunner(self)

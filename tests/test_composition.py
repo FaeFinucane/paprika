@@ -54,7 +54,7 @@ def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     assert runtime.background_drive.current == 0.05
     config = NetworkConfig(4, 3, ("<EOS>", "A"), 1)
     before = deepcopy(config)
-    config.build()
+    SpikingRuntime(config)
     assert config == before
     assert not hasattr(runtime, "_diagnostic_ticks")
     assert runtime.metrics.ticks == 0
