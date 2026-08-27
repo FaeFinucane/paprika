@@ -118,8 +118,6 @@ class RuntimeSession:
         isolated.plasticity.synapses = isolated.network.synapses
         isolated.output_readout = EventReadout(
             source.layout,
-            activation_threshold=source.output_readout.activation_threshold,
-            release_threshold=source.output_readout.release_threshold,
             arbitration=deepcopy(source.output_readout.arbitration),
         )
         isolated.response_session = deepcopy(source.response_session)

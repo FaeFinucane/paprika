@@ -48,11 +48,12 @@ duplicated offsets.
 - Input, hidden, affect, and action activity can project to character output
   populations through the sparse graph. The hidden region is recurrent space,
   not a separate language module.
-- `EventReadout` observes action or character evidence with separate activation
-  and release thresholds. One output is globally active at a time; no other
-  output is registered until that active population falls below the release
-  threshold. Simultaneous candidates are deterministically arbitrated, and
-  timestamps and inter-event intervals are recorded. Silence is not an event.
+- `EventReadout` observes spike frames from action or character populations.
+  Named subgroup spike counts form candidates, with one spike sufficient by
+  default. One output is latched at a time; its subgroup suppresses repeated
+  events while spiking and releases after a silent tick. Simultaneous candidates
+  are arbitrated by spike count, then priorities and stable subgroup order.
+  Timestamps and inter-event intervals are recorded. Silence is not an event.
   `<EOS>` is a terminal character event.
 - `ResponseSession` tracks input and response lifecycle. Readout state is
   response-local by default; recurrent neuron state, synaptic activity, affect,

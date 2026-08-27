@@ -79,8 +79,10 @@ def test_host_action_response_uses_event_arbitration() -> None:
     agent = ConversationAgent()
     zero = np.zeros(agent.runtime.layout.total_count)
     frame = zero.copy()
-    frame[agent.runtime.layout.subgroup(Population.OUTPUT_ACTION, "answer")] = 1.0
-    frame[agent.runtime.layout.subgroup(Population.OUTPUT_ACTION, "clarify")] = 2.0
+    answer = agent.runtime.layout.subgroup(Population.OUTPUT_ACTION, "answer")
+    clarify = agent.runtime.layout.subgroup(Population.OUTPUT_ACTION, "clarify")
+    frame[answer.start] = 1.0
+    frame[clarify.start : clarify.start + 2] = 1.0
     agent.runtime.network.step = lambda current: frame.copy()
 
     response = agent.respond("")

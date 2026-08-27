@@ -43,6 +43,19 @@ cleanup decisions are intentionally not listed as active tasks.
 - Compare stateful-lifetime evaluation (continuing membrane, refractory,
   pending-current, and recurrent state) with explicit cold-start evaluation;
   report training and evaluation metric windows separately.
+- Sweep the synthetic membrane time constant explicitly (including a more
+  brain-like candidate around `tau=10` ticks) together with frame spacing and
+  response duration; `tau=3` is a historical responsiveness heuristic, not a
+  calibrated biological parameter.
+- Measure and tune output projection initialization/fan-in separately from
+  hidden bootstrap connectivity. Character output edges currently start near
+  zero while input-to-hidden contacts are deliberately strong, so output
+  spike generation is a distinct capacity bottleneck.
+- Define a spike-native runtime boundary for sensory and teacher interactions:
+  preserve current injection for physical/noise/homeostatic drives, but prefer
+  encoded external spike trains and spike-delivered teaching signals for
+  ordinary network interactions. Do not add a second core or bypass the LIF
+  dynamics without an explicit source-population design.
 - Use the existing sparse weight-delta/session snapshots to distinguish
   short-term neural-state learning from synaptic consolidation, including
   pathway-specific eligibility and weight changes.

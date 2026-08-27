@@ -67,16 +67,16 @@ def test_action_readout_only_exposes_named_layout_groups() -> None:
     assert not hasattr(readout, "policy_weights")
 
 
-def test_repeated_character_requires_release() -> None:
+def test_repeated_character_requires_silent_tick() -> None:
     current = make_layout()
-    readout = EventReadout(current, activation_threshold=1.0, release_threshold=0.5)
+    readout = EventReadout(current)
     character = current.subgroup(Population.OUTPUT_CHAR, "m")
 
     first = frame()
     first[character] = 1.0
     event = readout.observe(first, timestamp=0)
     assert event is not None and event.name == "m"
-    assert readout.observe(first, timestamp=1) is None  # sustained activation
+    assert readout.observe(first, timestamp=1) is None  # sustained spikes
 
     assert readout.observe(frame(), timestamp=2) is None
     released = frame()
@@ -112,12 +112,12 @@ def test_eos_is_an_event_and_suppresses_later_output() -> None:
     assert len(readout.events) == 1
 
 
-def test_sustained_activation_emits_once() -> None:
+def test_sustained_spikes_emit_once() -> None:
     current = make_layout()
     readout = EventReadout(current)
     action = current.subgroup(Population.OUTPUT_ACTION, "answer")
     active = frame()
-    active[action] = 1.0
+    active[action.start] = 1.0
 
     event = readout.observe(active)
     assert event is not None and event.name == "answer"
@@ -153,8 +153,8 @@ def test_readout_emits_only_the_strongest_simultaneous_character() -> None:
     weaker = current.subgroup(Population.OUTPUT_CHAR, "m")
     stronger = current.subgroup(Population.OUTPUT_CHAR, "a")
     active = frame()
-    active[weaker] = 1.0
-    active[stronger] = 2.0
+    active[weaker.start] = 1.0
+    active[stronger.start : stronger.start + 2] = 1.0
 
     event = readout.observe(active, timestamp=0)
     assert event is not None and event.name == "a"
@@ -171,7 +171,7 @@ def test_arbitration_priorities_are_configurable() -> None:
 
 def test_global_active_output_blocks_other_candidates_until_release() -> None:
     current = make_layout()
-    readout = EventReadout(current, release_threshold=0.5)
+    readout = EventReadout(current)
     action = current.subgroup(Population.OUTPUT_ACTION, "answer")
     character = current.subgroup(Population.OUTPUT_CHAR, "m")
     first = frame()
@@ -192,6 +192,9 @@ def test_global_active_output_blocks_other_candidates_until_release() -> None:
     assert readout.events[-1].interval == 2
 
 
-def test_thresholds_require_hysteresis_order() -> None:
-    with np.testing.assert_raises(ValueError):
-        EventReadout(make_layout(), activation_threshold=1.0, release_threshold=1.0)
+def test_activation_arguments_are_not_supported() -> None:
+    with np.testing.assert_raises(TypeError):
+        EventReadout(make_layout(), activation_threshold=1.0)  # type: ignore[call-arg]
+
+    with np.testing.assert_raises(TypeError):
+        EventReadout(make_layout()).observe(frame(), activation=frame())  # type: ignore[call-arg]

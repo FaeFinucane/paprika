@@ -75,9 +75,9 @@ class ArbitrationDecision:
 class OutputArbitrationPolicy:
     """Deterministically select at most one candidate event.
 
-    Evidence is the primary signal.  Priorities only resolve equal evidence:
+    Spike count is the primary signal.  Priorities only resolve equal evidence:
     EOS wins over a character, actions win over characters, and subgroup order
-    is the final stable tie-breaker. Activation state is deliberately host-side
+    is the final stable tie-breaker. Latch state is deliberately host-side
     state, supplied by ``EventReadout``.
     """
 
@@ -125,17 +125,9 @@ class EventReadout:
         self,
         layout: PopulationLayout,
         *,
-        activation_threshold: float = 1.0,
-        release_threshold: float = 0.5,
         arbitration: OutputArbitrationPolicy | None = None,
     ) -> None:
-        if activation_threshold <= 0 or release_threshold <= 0:
-            raise ValueError("activation and release thresholds must be positive")
-        if release_threshold >= activation_threshold:
-            raise ValueError("release_threshold must be less than activation_threshold")
         self.layout = layout
-        self.activation_threshold = float(activation_threshold)
-        self.release_threshold = float(release_threshold)
         self.arbitration = arbitration or OutputArbitrationPolicy()
         self._groups: dict[Population, dict[str, np.ndarray]] = {
             Population.OUTPUT_ACTION: self._named_groups(layout.action_subgroups),
@@ -162,28 +154,17 @@ class EventReadout:
         self,
         frame: np.ndarray,
         *,
-        activation: np.ndarray | None = None,
-        activations: np.ndarray | None = None,
         timestamp: int | None = None,
         populations: Iterable[Population] | None = None,
     ) -> OutputEvent | None:
         """Observe one tick; ``None`` means silence, never EOS.
 
-        ``frame`` can be spikes.  ``activation``/``activations`` optionally
-        supplies a continuous activation trace; the stronger evidence at each
-        neuron is used without counting a spike and activation twice.
+        ``frame`` contains the spikes emitted on the current tick. Evidence is
+        the number of spiking neurons in each named subgroup.
         """
         values = np.asarray(frame, dtype=float)
         if values.ndim != 1 or values.size < self.layout.total_count:
             raise ValueError("output frame must cover the named network layout")
-        if activation is not None and activations is not None:
-            raise TypeError("provide either activation or activations, not both")
-        activation_values = activation if activation is not None else activations
-        if activation_values is not None:
-            activation_values = np.asarray(activation_values, dtype=float)
-            if activation_values.ndim != 1 or activation_values.size < self.layout.total_count:
-                raise ValueError("activation frame must cover the named network layout")
-            values = np.maximum(values, activation_values)
         if timestamp is None:
             timestamp = self.timestamp + 1
         if timestamp <= self.timestamp:
@@ -194,7 +175,7 @@ class EventReadout:
         if self.active_output is not None:
             population, name = self.active_output
             group = self._groups[population][name]
-            if float(values[group].sum()) >= self.release_threshold:
+            if int(np.count_nonzero(values[group] > 0.0)) >= 1:
                 self.last_arbitration = ArbitrationDecision(None, (), "active")
                 self.arbitrations.append(self.last_arbitration)
                 return None
@@ -205,8 +186,8 @@ class EventReadout:
         candidates: list[OutputCandidate] = []
         for population in selected_populations:
             for order, (name, group) in enumerate(self._groups.get(population, {}).items()):
-                evidence = float(values[group].sum())
-                if evidence >= self.activation_threshold:
+                evidence = float(np.count_nonzero(values[group] > 0.0))
+                if evidence > 0.0:
                     candidates.append(OutputCandidate(population, name, evidence, order))
         decision = self.arbitration.arbitrate(candidates)
         self.last_arbitration = decision

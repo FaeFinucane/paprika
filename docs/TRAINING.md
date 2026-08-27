@@ -41,10 +41,11 @@ Implemented in `ConversationAgent.train_response()` and
 `RewardModulatedSTDP.reinforce()`; action groups are defined by
 `src/continual_agent/cognition/readout.py` and `PopulationLayout`.
 
-`EventReadout` uses hysteresis: a new output must reach
-`activation_threshold`, then remains globally active until its population falls
-below `release_threshold`. This prevents sustained activity from repeating an
-event while allowing the same output to fire again after release.
+`EventReadout` consumes spike frames only. A named subgroup becomes a candidate
+when at least one of its neurons spikes on the current tick.
+After an event, that subgroup is latched while it emits spikes and releases on
+the first silent tick. This prevents sustained spiking from repeating an event
+while allowing the same output to fire again after release.
 
 ### 4. Ordered character teacher alignment
 

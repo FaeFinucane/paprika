@@ -78,7 +78,6 @@ class InputRunner:
                     emitted = runtime.step_input_signal(item)
                     event = runtime.output_readout.observe(
                         emitted,
-                        activation=runtime.network.neurons.voltage,
                         populations=(Population.OUTPUT_CHAR,),
                         timestamp=clock,
                     )
@@ -103,7 +102,6 @@ class InputRunner:
                 emitted = runtime.step(runtime.current(frame))
                 event = runtime.output_readout.observe(
                     emitted,
-                    activation=runtime.network.neurons.voltage,
                     populations=(Population.OUTPUT_CHAR,),
                     timestamp=clock,
                 )
@@ -141,16 +139,13 @@ class InputRunner:
                 if isinstance(item, InputSignal):
                     emitted = runtime.step_input_signal(item)
                     if item is InputSignal.INPUT_END or observe_during_input:
-                        visible, activation = emitted, runtime.network.neurons.voltage
+                        visible = emitted
                         if item is InputSignal.INPUT_END and not observe_during_input:
                             eos = runtime.layout.subgroup(Population.OUTPUT_CHAR, "<EOS>")
                             visible = np.zeros_like(emitted, dtype=float)
                             visible[eos] = emitted[eos]
-                            activation = np.zeros_like(runtime.network.neurons.voltage)
-                            activation[eos] = runtime.network.neurons.voltage[eos]
                         event = runtime.output_readout.observe(
                             visible,
-                            activation=activation,
                             populations=(Population.OUTPUT_CHAR,),
                             timestamp=clock,
                         )
@@ -169,7 +164,6 @@ class InputRunner:
                 if observe_during_input:
                     event = runtime.output_readout.observe(
                         emitted,
-                        activation=runtime.network.neurons.voltage,
                         populations=(Population.OUTPUT_CHAR,),
                         timestamp=clock,
                     )
@@ -183,7 +177,6 @@ class InputRunner:
                 emitted = runtime.step(build(np.zeros(runtime.input_features)))
                 event = runtime.output_readout.observe(
                     emitted,
-                    activation=runtime.network.neurons.voltage,
                     populations=(Population.OUTPUT_CHAR,),
                     timestamp=clock,
                 )

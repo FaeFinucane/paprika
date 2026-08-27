@@ -79,7 +79,6 @@ class ResponseMixin:
             spikes.append(emitted)
             action_event = self.runtime.output_readout.observe(
                 emitted,
-                activation=self.runtime.network.neurons.voltage,
                 populations=(Population.OUTPUT_ACTION,),
             )
             if action_event is not None:
@@ -135,7 +134,6 @@ class ResponseMixin:
             )
             event = self.runtime.output_readout.observe(
                 emitted,
-                activation=self.runtime.network.neurons.voltage,
                 populations=(Population.OUTPUT_CHAR,),
             )
             if event is None:

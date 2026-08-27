@@ -217,8 +217,6 @@ def _make_runtime(
         homeostasis_update_interval=config.homeostasis_update_interval,
         homeostasis_max_current=config.homeostasis_max_current,
     )
-    agent.output_readout.activation_threshold = 0.25
-    agent.output_readout.release_threshold = 0.2
     agent.network.neurons.tau_membrane = 3.0
     agent.network.neurons.refractory_ticks = 1
     return agent

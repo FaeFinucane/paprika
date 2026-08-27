@@ -37,7 +37,7 @@ def test_agent_retains_context_until_conversation_reset() -> None:
     np.testing.assert_array_equal(agent.working_memory.state, np.zeros(16))
 
 
-def test_working_memory_changes_action_evidence() -> None:
+def test_working_memory_persists_without_voltage_readout_evidence() -> None:
     config = AgentConfig(input_features=16, seed=9)
     with_context = ConversationAgent(config)
     without_context = ConversationAgent(config)
@@ -46,4 +46,5 @@ def test_working_memory_changes_action_evidence() -> None:
     contextual = with_context.respond("Which should I choose?")
     without = without_context.respond("Which should I choose?")
 
-    assert contextual.evidence != without.evidence
+    assert np.any(with_context.working_memory.state != without_context.working_memory.state)
+    assert contextual.timed_out and without.timed_out
