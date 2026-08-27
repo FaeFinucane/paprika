@@ -145,7 +145,6 @@ class EventReadout:
         self.timestamp = -1
         self.stopped = False
         self.events: list[OutputEvent] = []
-        self.arbitrations: list[ArbitrationDecision] = []
         self.last_arbitration: ArbitrationDecision | None = None
         self.active_output: tuple[Population, str] | None = None
         self._last_event_timestamp: int | None = None
@@ -177,7 +176,6 @@ class EventReadout:
             group = self._groups[population][name]
             if int(np.count_nonzero(values[group] > 0.0)) >= 1:
                 self.last_arbitration = ArbitrationDecision(None, (), "active")
-                self.arbitrations.append(self.last_arbitration)
                 return None
             self.active_output = None
         selected_populations = (
@@ -191,7 +189,6 @@ class EventReadout:
                     candidates.append(OutputCandidate(population, name, evidence, order))
         decision = self.arbitration.arbitrate(candidates)
         self.last_arbitration = decision
-        self.arbitrations.append(decision)
         if decision.selected is None:
             return None
         selected = decision.selected
