@@ -158,8 +158,7 @@ Raw-frame training is an explicit session: exactly one `INPUT_BEGIN` and
 resets readout and lifecycle state while neural state and traces follow the
 configured `SessionPolicy`, even when the iterator or validation fails. The canonical character training operation
 is an ordered event stream ending in EOS and remains a recurrent-state baseline,
-not a general sequence-memory claim. The automated curriculum entry point is
-`src/continual_agent/experiments/run_conversation.py`.
+not a general sequence-memory claim.
 
 Synthetic delayed training should replay the complete temporal input stream,
 including unlabeled delay frames. Those frames are presented as ordinary

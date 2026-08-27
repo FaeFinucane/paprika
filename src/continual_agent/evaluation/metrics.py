@@ -3,35 +3,12 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.environment.scenarios import ConversationScenario
 
-
-@dataclass
-class TrainingReport:
-    rewards: list[float] = field(default_factory=list)
-    actions: list[str] = field(default_factory=list)
-
-    @property
-    def mean_reward(self) -> float:
-        return sum(self.rewards) / len(self.rewards) if self.rewards else 0.0
-
-
-def run_curriculum(
-    agent: ConversationAgent,
-    scenarios: tuple[ConversationScenario, ...],
-    repetitions: int,
-) -> TrainingReport:
-    report = TrainingReport()
-    for _ in range(repetitions):
-        for scenario in scenarios:
-            result = agent.train_response(scenario.messages[0], scenario.expected)
-            reward = scenario.reward_for(result.action)
-            report.rewards.append(reward)
-            report.actions.append(result.action.value)
-    return report
+if TYPE_CHECKING:
+    from continual_agent.agent.conversation_agent import ConversationAgent
 
 
 def evaluate_affect_targets(

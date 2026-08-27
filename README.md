@@ -21,18 +21,6 @@ python3 -m venv .venv
 .venv/bin/python -m continual_agent.experiments.synthetic_temporal
 ```
 
-## Run the automated curriculum
-
-```bash
-.venv/bin/python -m continual_agent.experiments.run_conversation
-```
-
-The current curriculum teaches five typed response intents:
-
-```text
-clarify, uncertain, answer, revise, acknowledge
-```
-
 It is deliberately not a free-form chatbot yet. Character responses use the
 spiking output populations and timestamped event-readout path.
 
