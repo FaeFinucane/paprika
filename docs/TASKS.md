@@ -7,10 +7,6 @@ results are liable to measure protocol artefacts rather than learning.
 
 ## Priority: experimental validity and measurable learning
 
-- [x] Preserve the complete delayed input stream during training. Replay every
-  input tick, including zero-valued delay frames, while keeping target labels
-  separate from presented input. Do not train on adjacent labelled symbols and
-  evaluate across gaps.
 - Add an optional held-out evaluation split for larger or overtraining-prone
   experiments. The tiny synthetic experiment may continue to use its training
   sequences while it is a smoke test, but larger runs must report training and
@@ -21,34 +17,19 @@ results are liable to measure protocol artefacts rather than learning.
   stateful-lifetime and cold-start evaluation without treating cold-start as
   the only valid intelligence measure. Ensure evaluation does not accidentally
   inherit state when a controlled comparison is requested.
-- [x] Include background-drive RNG and every other reproducibility-critical state
-  in snapshots.
 - Categorize synthetic-temporal tests into protocol/unit tests and behavioral
   architecture tests. Keep mechanics tests for boundaries, readout, and event
   accounting; add a separate behavioral harness that requires event
   precision/recall, exact or partial sequence accuracy, EOS accuracy, latency,
   and comparison with untrained/no-learning controls. Do not treat weight
   movement as evidence of temporal copying.
-- [x] Add independent random seeds as a first-class replicate dimension. Report
-  per-seed results, variance, confidence intervals, and learning curves rather
-  than relying on tiny aggregate means.
 - Add dedicated event-stream cases for `ma`, `ba`, `mama`, `baba`, repeated
   characters, valid silence, premature EOS, missing EOS, and post-EOS output.
   Clarify and test inclusive/exclusive `end_time` and silence-boundary
   semantics.
-- [x] Validate event-stream inputs, including `end_time >= max(observed timestamp)`;
-  define behavior for empty observations, timestamp-zero events, withheld
-  prefixes, and all EOS/post-EOS combinations.
 
 ## Priority: lifecycle and learning semantics
 
-- [x] Unify `train_response_events()` with the normal response/session lifecycle,
-  or give it a complete explicit training-session lifecycle. It must honor
-  `SessionPolicy`, reset readout state correctly, and avoid stale state between
-  repeated training calls.
-- [x] Fix or rename `train_reward_modulated()`: it must either accept and commit a
-  reward/reward callback or be clearly named as an eligibility-observation path.
-  A method named training must not silently perform no weight updates.
 - Centralize reward-to-RPE conversion and baseline updates across conversational
   and synthetic training. Prefer one event-based commitment path for ordinary
   observed events; if missing/deferred outcomes are settled at trial end, make
@@ -61,8 +42,6 @@ results are liable to measure protocol artefacts rather than learning.
   incorrect and unwanted events as exploration bootstrapping. Compare neutral
   and negative alternatives when scaling experiments, and always report event
   quality separately from aggregate reward.
-- [x] Ensure teacher alignment only updates enabled edges and reapplies the
-  persistent ablation mask after every structural update.
 - Decide whether supervised delayed-copy training is an explicitly named
   structural/oracle baseline or a spike-based learning method. Add a
   free-running evaluation with teacher signals removed.
@@ -75,18 +54,8 @@ results are liable to measure protocol artefacts rather than learning.
 - Validate `NetworkConfig` completely: positive dimensions, unique output
   tokens and subgroup names, required `<EOS>`, valid population coverage, and
   non-empty protocol groups.
-- [x] Reject NaN and infinite values at public boundaries for input frames, direct
-  currents, drives, homeostasis configuration, and synaptic weights.
 - Implement `persist_affect` and `persist_working_memory` semantics fully, or
   remove those options from the runtime policy and make ownership explicit.
-- [x] Preserve custom plugins and plugin state when cloning isolated runtimes, or
-  reject unsupported plugins explicitly.
-- [x] Reapply shared ablation masks after isolated weight merges; treat mask changes
-  as merge conflicts under every conflict policy.
-- [x] Coalesce repeated updates to one weight before snapshot merging, or reject
-  duplicate delta records consistently.
-- [x] Add exception-safe response cleanup so failed episodes cannot leave lifecycle,
-  readout, affect, working-memory, or neural state partially active.
 - Return actual elapsed simulation ticks from response APIs. Keep event count,
   latency, and duration as separate metrics.
 
@@ -121,10 +90,6 @@ results are liable to measure protocol artefacts rather than learning.
   named projection builders that return explicit edge ranges or index arrays.
 - Introduce small typing protocols for runtime services, task adapters, readouts,
   and facade mixins instead of relying on `Any`.
-- [x] Centralize scenario validation and reward calculation. `run_curriculum`
-  should use `ConversationScenario.reward_for()`, validate repetitions and
-  messages, and process complete multi-turn scenarios rather than only
-  `messages[0]`.
 - Make affect evaluation isolated and deterministic by default; validate target
   fields, ranges, and coverage.
 - Decide and document the public API surface consistently. Export the canonical
@@ -137,9 +102,6 @@ results are liable to measure protocol artefacts rather than learning.
   always returns to fixed neutral baselines.
 - Validate shapes at the `AffectiveCircuit` boundary rather than relying on
   later NumPy indexing errors.
-- [x] Reduce hot-path allocations in `current()` and `boundary_current()` with
-  reusable buffers or a drive-based frame adapter, while documenting ownership
-  of reusable spike buffers returned by `step()`.
 
 ## Priority: biologically honest projection seeding
 
