@@ -29,26 +29,15 @@ class AffectiveCircuit:
 
     signal_names = AFFECT_SIGNALS
 
-    def __init__(self, neurons_per_signal: int = 4, learning_rate: float = 0.12):
-        if (
-            isinstance(neurons_per_signal, bool)
-            or not isinstance(neurons_per_signal, int)
-            or neurons_per_signal <= 0
-        ):
-            raise ValueError("neurons_per_signal must be positive")
+    def __init__(self, layout: PopulationLayout, learning_rate: float = 0.12):
+        if tuple(layout.affect_subgroups) != self.signal_names:
+            raise ValueError("layout affect subgroups must match affect signals")
+        self.layout = layout
         if not np.isfinite(learning_rate) or learning_rate < 0:
             raise ValueError("learning_rate must be finite and non-negative")
-        self.neurons_per_signal = neurons_per_signal
         self.learning_rate = learning_rate
 
-    @property
-    def neuron_count(self) -> int:
-        return len(self.signal_names) * self.neurons_per_signal
-
     def groups(self, layout: PopulationLayout) -> dict[str, np.ndarray]:
-        bounds = layout.slice(Population.AFFECT)
-        if bounds.stop - bounds.start != self.neuron_count:
-            raise ValueError("layout affect population does not match circuit")
         return {
             name: np.arange(
                 layout.subgroup(Population.AFFECT, name).start,
@@ -60,20 +49,19 @@ class AffectiveCircuit:
     def projection_indices(self, layout: PopulationLayout) -> np.ndarray:
         """Return ``[signal, input_feature, neuron_in_population]`` edge IDs."""
 
-        bounds = layout.slice(Population.AFFECT)
         input_count = layout.input_count
-        if bounds.stop - bounds.start != self.neuron_count:
-            raise ValueError("layout affect population does not match circuit")
         indices = np.empty(
-            (len(self.signal_names), input_count, self.neurons_per_signal),
+            (len(self.signal_names), input_count, layout.subgroup_width(Population.AFFECT)),
             dtype=np.int64,
         )
-        affect_count = self.neuron_count
+        affect_count = layout.affect_count
         for signal_index in range(len(self.signal_names)):
             for feature in range(input_count):
-                edge_start = feature * affect_count + signal_index * self.neurons_per_signal
+                edge_start = feature * affect_count + signal_index * layout.subgroup_width(
+                    Population.AFFECT
+                )
                 indices[signal_index, feature] = np.arange(
-                    edge_start, edge_start + self.neurons_per_signal
+                    edge_start, edge_start + layout.subgroup_width(Population.AFFECT)
                 )
         return indices
 
@@ -116,7 +104,7 @@ class AffectiveCircuit:
         probabilities = 1.0 / (1.0 + np.exp(-(weights @ features)))
         error = self._targets(state) - probabilities
         update = self.learning_rate * error[:, None] * features[None, :]
-        synapses.weight[edge_indices] += update[:, :, None] / self.neurons_per_signal
+        synapses.weight[edge_indices] += update[:, :, None] / edge_indices.shape[2]
         synapses.weight[edge_indices] = np.clip(synapses.weight[edge_indices], -1.0, 1.0)
 
     def _validate_projection_inputs(
@@ -125,7 +113,11 @@ class AffectiveCircuit:
         indices = np.asarray(edge_indices)
         if indices.dtype.kind not in "iu":
             raise ValueError("affect projection edge indices must be integers")
-        if indices.shape != (len(self.signal_names), features.size, self.neurons_per_signal):
+        if indices.shape != (
+            len(self.signal_names),
+            features.size,
+            self.layout.subgroup_width(Population.AFFECT),
+        ):
             raise ValueError("affect projection indices have the wrong shape")
         if features.ndim != 1 or not np.isfinite(features).all():
             raise ValueError("affect features must be a finite 1D array")
@@ -145,7 +137,7 @@ class AffectiveCircuit:
         rates = np.asarray(
             [
                 sum(frame[group].sum() for frame in spike_frames)
-                / (len(spike_frames) * self.neurons_per_signal)
+                / (len(spike_frames) * layout.subgroup_width(Population.AFFECT))
                 for group in groups.values()
             ]
         )

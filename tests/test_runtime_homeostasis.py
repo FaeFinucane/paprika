@@ -1,10 +1,10 @@
 import numpy as np
 
-from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.population_homeostasis import HomeostasisConfig, PopulationHomeostasis
 from continual_agent.agent.runtime_metrics import RuntimeMetrics
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.simulation.population_layout import Population, PopulationLayout
+from tests.helpers import network_config
 
 
 def test_population_metrics_define_activity_fractions_and_distributions() -> None:
@@ -53,7 +53,7 @@ def test_homeostasis_moves_toward_target_and_is_bounded() -> None:
 
 def test_homeostasis_does_not_change_stdp_specialization() -> None:
     runtime = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -72,7 +72,7 @@ def test_homeostasis_does_not_change_stdp_specialization() -> None:
 def test_enabled_homeostasis_is_deterministic_for_a_seed() -> None:
     def make_runtime() -> SpikingRuntime:
         return SpikingRuntime(
-            NetworkConfig(
+            network_config(
                 input_features=4,
                 hidden_neurons=4,
                 output_tokens=("<EOS>", "A"),

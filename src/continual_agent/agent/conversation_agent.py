@@ -39,15 +39,9 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
     def __init__(self, config: NetworkConfig | None = None) -> None:
         self.config = config or NetworkConfig()
         self.actions = tuple(Action)
-        self.language = SpikingCharacterDecoder(
-            alphabet=self.config.language_alphabet,
-            neurons_per_token=self.config.neurons_per_token,
-        )
+        self.language = SpikingCharacterDecoder(self.config.layout)
         self.config = replace(
             self.config,
-            action_names=tuple(action.value for action in self.actions),
-            affect_names=AffectiveCircuit.signal_names,
-            output_tokens=self.language.tokens,
             session_policy=SessionPolicy(
                 reset_membrane=not self.config.persistent_working_memory,
                 reset_refractory=not self.config.persistent_working_memory,
@@ -60,13 +54,13 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
             self.config,
         )
         self.encoder = TextEncoder(
-            self.config.input_features,
+            self.config.layout.input_count,
             presentation_speed=self.config.presentation_speed,
         )
-        self.working_memory = WorkingMemory(self.config.input_features)
-        self.readout = ActionReadout(neurons_per_action=self.config.neurons_per_action)
+        self.working_memory = WorkingMemory(self.config.layout.input_count)
+        self.readout = ActionReadout(self.config.layout)
         self.affect = AffectiveState()
-        self.affect_circuit = AffectiveCircuit(neurons_per_signal=self.config.neurons_per_affect)
+        self.affect_circuit = AffectiveCircuit(self.config.layout)
         self.reward = RewardLedger()
         self.last_snapshot: DebugSnapshot | None = None
         self.last_execution_snapshot: SessionExecutionSnapshot | None = None

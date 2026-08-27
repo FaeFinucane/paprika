@@ -1,7 +1,6 @@
 import numpy as np
 
 from continual_agent.agent.conversation_agent import ConversationAgent
-from continual_agent.cognition.affect_circuit import AffectiveCircuit
 from continual_agent.simulation.population_layout import Population
 
 
@@ -32,15 +31,15 @@ def test_affect_population_is_part_of_main_network_state() -> None:
     output = agent.runtime.layout.slice(Population.OUTPUT_ACTION)
     assert affect.start < output.start
     assert output.start < agent.runtime.network.neurons.count
-    assert agent.affect_circuit.neuron_count == (
-        len(AffectiveCircuit.signal_names) * agent.config.neurons_per_affect
-    )
+    assert affect.stop - affect.start == agent.runtime.layout.subgroup_width(
+        Population.AFFECT
+    ) * len(agent.runtime.layout.affect_subgroups)
 
     affect_activity = _respond_with_trace(agent, "Please explain this clearly")[
         :, affect.start : output.start
     ]
 
-    assert affect_activity.shape[1] == agent.affect_circuit.neuron_count
+    assert affect_activity.shape[1] == affect.stop - affect.start
     assert affect_activity.sum() > 0
 
 

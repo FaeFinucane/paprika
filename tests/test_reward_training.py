@@ -2,11 +2,12 @@ import numpy as np
 
 from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.agent.session import InputSignal
+from continual_agent.simulation.population_layout import Population
 
 
 def test_reward_modulated_training_commits_one_diffuse_reward() -> None:
     agent = ConversationAgent()
-    frame = np.zeros(agent.config.input_features)
+    frame = np.zeros(agent.runtime.layout.slice(Population.INPUT).stop)
     frame[1] = 1.0
     agent.runtime.train_reward_modulated_events(
         (InputSignal.INPUT_BEGIN, (frame, "a"), InputSignal.INPUT_END),

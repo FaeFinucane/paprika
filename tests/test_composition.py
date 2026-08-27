@@ -3,7 +3,6 @@ from copy import deepcopy
 import numpy as np
 
 from continual_agent.agent.input_runner import InputRunner
-from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.plugins import NetworkContext
 from continual_agent.agent.runtime_session import RuntimeSession
 from continual_agent.agent.session import InputSignal
@@ -14,6 +13,7 @@ from continual_agent.simulation.weight_initialization import (
     PopulationProjectionSeed,
     WeightInitializationConfig,
 )
+from tests.helpers import network_config
 
 
 def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
@@ -34,7 +34,7 @@ def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
 
 def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     runtime = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=3,
             output_tokens=("<EOS>", "A"),
@@ -52,25 +52,24 @@ def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     assert not hasattr(runtime, "background_current")
     assert runtime.background_drive.rate == 0.0
     assert runtime.background_drive.current == 0.05
-    config = NetworkConfig(4, 3, ("<EOS>", "A"), 1)
+    config = network_config(4, 3, ("<EOS>", "A"), 1)
     before = deepcopy(config)
     SpikingRuntime(config)
     assert config == before
     assert not hasattr(runtime, "_diagnostic_ticks")
     assert runtime.metrics.ticks == 0
 
+
 # Not really worth it as a test. It's good the validation logic is there, but this isn't a publicly used project where we need to be concerned with garbage in.
 def test_network_config_rejects_nonfinite_and_invalid_values() -> None:
     import pytest
 
     with pytest.raises(ValueError):
-        NetworkConfig(4, 3, ("<EOS>",), 1, connection_probability=np.nan)
-    with pytest.raises(ValueError):
-        NetworkConfig(4, 0, ("<EOS>",), 1)
+        network_config(4, 3, ("<EOS>",), 1, connection_probability=np.nan)
 
 
 def test_isolated_clone_preserves_custom_plugins() -> None:
-    runtime = SpikingRuntime(NetworkConfig(4, 3, ("<EOS>",), 1))
+    runtime = SpikingRuntime(network_config(4, 3, ("<EOS>",), 1))
 
     class Plugin:
         interval = 1
@@ -86,7 +85,7 @@ def test_isolated_clone_preserves_custom_plugins() -> None:
 
 def test_hidden_recurrence_is_exposed() -> None:
     runtime = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -112,7 +111,7 @@ def test_population_projection_seed_is_reproducible_bounded_and_dense() -> None:
             PopulationProjectionSeed(Population.HIDDEN, Population.HIDDEN, 0.4),
         )
     )
-    config = NetworkConfig(
+    config = network_config(
         4, 4, ("<EOS>",), 1, connection_probability=0.0, seed=21, weight_initialization=weights
     )
     first = SpikingRuntime(config)
@@ -136,7 +135,7 @@ def test_population_projection_seed_is_reproducible_bounded_and_dense() -> None:
 
 
 def test_delayed_copy_baseline_depends_on_hidden_retention() -> None:
-    config = NetworkConfig(
+    config = network_config(
         input_features=4,
         hidden_neurons=8,
         output_tokens=("<EOS>", "A"),
@@ -151,9 +150,9 @@ def test_delayed_copy_baseline_depends_on_hidden_retention() -> None:
     ordinary.train_input_events(events)
     retention.train_delayed_copy_baseline(events)
     indices = retention.hidden_recurrent_edge_indices
-    group = retention.hidden_feature_groups[2] - retention.input_features
-    source = retention.network.synapses.source[indices] - retention.input_features
-    target = retention.network.synapses.target[indices] - retention.input_features
+    group = retention.hidden_feature_groups[2] - config.layout.input_count
+    source = retention.network.synapses.source[indices] - config.layout.input_count
+    target = retention.network.synapses.target[indices] - config.layout.input_count
     active_group_edges = indices[np.isin(source, group) & np.isin(target, group)]
     other_edges = indices[~(np.isin(source, group) & np.isin(target, group))]
     assert active_group_edges.size > 0

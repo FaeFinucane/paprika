@@ -16,14 +16,16 @@ The default configuration has 188 neurons:
 
 | Population | Size | Purpose | Implementation |
 | --- | ---: | --- | --- |
-| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled by `src/continual_agent/agent/network_config.py` |
+| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; defined by `PopulationLayout` |
 | `HIDDEN` | 48 | Recurrent internal state | `src/continual_agent/simulation/core.py`; layout in `src/continual_agent/simulation/population_layout.py` |
 | `AFFECT` | 7 x 4 = 28 | Neural populations for valence, arousal, uncertainty, curiosity, threat, competence, and social affiliation | `src/continual_agent/cognition/affect_circuit.py` and `src/continual_agent/cognition/affect.py` |
-| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed by `src/continual_agent/agent/network_config.py` |
+| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; defined by `PopulationLayout` |
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
-`NetworkConfig` controls these dimensions and owns construction fields and layout,
-neuron, synapse, drive, plugin, and readout construction; the dedicated
+`PopulationLayout` (created with `PopulationLayout.from_dimensions`) is the sole
+source of population dimensions, offsets, and semantic subgroup slices.
+`NetworkConfig` carries that finalized layout plus simulation/training settings;
+the dedicated
 `WeightInitializer` owns validated weight distributions, population projection
 seeds, bootstrap contacts, and stable named RNG streams. It
 returns one coherent network bundle to `SpikingRuntime`, the canonical

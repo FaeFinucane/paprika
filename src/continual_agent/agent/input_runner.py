@@ -48,9 +48,9 @@ class InputRunner:
                 else:
                     frame, target = item, None
                 frame = np.asarray(frame, dtype=float)
-                if frame.shape != (runtime.input_features,):
+                if frame.shape != (runtime.layout.input_count,):
                     raise ValueError("raw input frame has the wrong shape")
-                if target is not None and target not in runtime.output_tokens:
+                if target is not None and target not in runtime.layout.char_subgroups:
                     raise ValueError("labelled raw input frames require a known string target")
                 runtime.step(build(frame))
                 if target is not None:
@@ -59,9 +59,9 @@ class InputRunner:
                     self._apply_delayed_copy_baseline(frame, target)
                 # Apply the teacher as a weight target, without inventing a tick.
             if ended:
-                emitted = runtime.step(build(np.zeros(runtime.input_features)))
+                emitted = runtime.step(build(np.zeros(runtime.layout.input_count)))
                 runtime._apply_boundary_target("<EOS>", emitted)
-                teacher = build(np.zeros(runtime.input_features))
+                teacher = build(np.zeros(runtime.layout.input_count))
                 teacher[runtime.layout.subgroup(Population.OUTPUT_CHAR, "<EOS>")] += 3.0
                 runtime.step(teacher)
             if not began or not ended or runtime.response_session.input_active:
@@ -73,10 +73,10 @@ class InputRunner:
         """Teach the active hidden group to retain and emit its symbol."""
         runtime = self.runtime
         feature = int(np.argmax(np.maximum(frame, 0.0)))
-        group = runtime.hidden_feature_groups[feature] - runtime.input_features
+        group = runtime.hidden_feature_groups[feature] - runtime.layout.input_count
         edges = runtime.hidden_recurrent_edge_indices
-        sources = runtime.network.synapses.source[edges] - runtime.input_features
-        targets = runtime.network.synapses.target[edges] - runtime.input_features
+        sources = runtime.network.synapses.source[edges] - runtime.layout.input_count
+        targets = runtime.network.synapses.target[edges] - runtime.layout.input_count
         selected = edges[np.isin(sources, group) & np.isin(targets, group)]
         if selected.size == 0:
             return
@@ -89,10 +89,10 @@ class InputRunner:
         )
         output_edges = runtime.hidden_output_edge_indices.reshape(
             runtime.layout.hidden_count,
-            len(runtime.output_tokens),
-            runtime.neurons_per_token,
+            len(runtime.layout.char_subgroups),
+            runtime.layout.subgroup_width(Population.OUTPUT_CHAR),
         )
-        target_edges = output_edges[group, runtime.output_tokens.index(target)]
+        target_edges = output_edges[group, tuple(runtime.layout.char_subgroups).index(target)]
         runtime.network.synapses.weight[target_edges] = 1.0
         runtime.network.neurons.voltage[runtime.layout.slice(Population.HIDDEN)][group] = 1.0
         runtime.apply_ablation_mask()
@@ -130,9 +130,9 @@ class InputRunner:
                 frame, target = item
                 frame = np.asarray(frame, dtype=float)
                 if (
-                    frame.shape != (runtime.input_features,)
+                    frame.shape != (runtime.layout.input_count,)
                     or not isinstance(target, str)
-                    or target not in runtime.output_tokens
+                    or target not in runtime.layout.char_subgroups
                 ):
                     raise ValueError("labelled raw input frames require a known string target")
                 emitted = runtime.step(runtime.current(frame))
@@ -200,7 +200,7 @@ class InputRunner:
                     clock += 1
                     continue
                 frame = np.asarray(item, dtype=float)
-                if frame.shape != (runtime.input_features,):
+                if frame.shape != (runtime.layout.input_count,):
                     raise ValueError("raw input frame has the wrong shape")
                 runtime.response_session.accept_input_frame()
                 emitted = runtime.step(build(frame))
@@ -217,7 +217,7 @@ class InputRunner:
             if runtime.response_session.state is SessionState.RECEIVING_INPUT:
                 runtime.response_session.begin_response()
             for _ in range(response_ticks):
-                emitted = runtime.step(build(np.zeros(runtime.input_features)))
+                emitted = runtime.step(build(np.zeros(runtime.layout.input_count)))
                 event = runtime.output_readout.observe(
                     emitted,
                     populations=(Population.OUTPUT_CHAR,),
@@ -265,15 +265,18 @@ class InputRunner:
     def _supervised_target(self, frame: np.ndarray, target: str) -> None:
         runtime = self.runtime
         active = 2.0 * np.maximum(frame, 0.0)
-        target_index = runtime.output_tokens.index(target)
+        output_tokens = tuple(runtime.layout.char_subgroups)
+        target_index = output_tokens.index(target)
         hidden_activity = np.maximum(
             runtime.network.neurons.voltage[runtime.layout.slice(Population.HIDDEN)], 0.0
         )
         feature = int(np.argmax(active))
-        group = runtime.hidden_feature_groups[feature] - runtime.input_features
+        group = runtime.hidden_feature_groups[feature] - runtime.layout.input_count
         hidden_activity[group] += active.mean()
         edges = runtime.hidden_output_edge_indices.reshape(
-            hidden_activity.size, len(runtime.output_tokens), runtime.neurons_per_token
+            hidden_activity.size,
+            len(output_tokens),
+            runtime.layout.subgroup_width(Population.OUTPUT_CHAR),
         )[:, target_index][group]
         runtime.network.synapses.weight[edges] = np.clip(
             runtime.network.synapses.weight[edges]
@@ -285,6 +288,7 @@ class InputRunner:
 
     def _boundary_target(self, target: str, emitted: np.ndarray) -> None:
         runtime = self.runtime
+        output_tokens = tuple(runtime.layout.char_subgroups)
         hidden = runtime.layout.slice(Population.HIDDEN)
         activity = np.maximum(runtime.network.neurons.voltage[hidden], 0.0) + emitted[
             hidden
@@ -292,14 +296,14 @@ class InputRunner:
         if not np.any(activity):
             return
         edges = runtime.hidden_output_edge_indices.reshape(
-            activity.size, len(runtime.output_tokens), runtime.neurons_per_token
-        )[:, runtime.output_tokens.index(target)]
+            activity.size, len(output_tokens), runtime.layout.subgroup_width(Population.OUTPUT_CHAR)
+        )[:, output_tokens.index(target)]
         selected = edges[activity > 0.0]
         runtime.network.synapses.weight[selected] = np.clip(
             runtime.network.synapses.weight[selected]
             + runtime.plasticity.learning_rate
             * activity[activity > 0.0, None]
-            / runtime.neurons_per_token,
+            / runtime.layout.subgroup_width(Population.OUTPUT_CHAR),
             -1.0,
             1.0,
         )

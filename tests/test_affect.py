@@ -60,20 +60,15 @@ def test_agent_exposes_latest_debug_snapshot() -> None:
 
 
 def test_affective_spiking_circuit_aligns_to_targets() -> None:
-    circuit = AffectiveCircuit(neurons_per_signal=4)
     input_count = 8
-    affect_names = circuit.signal_names
-    affect_start = input_count + 48
-    layout = PopulationLayout(
+    layout = PopulationLayout.from_dimensions(
         input_count=input_count,
-        affect_count=circuit.neuron_count,
-        affect_subgroups={
-            name: slice(affect_start + index * 4, affect_start + (index + 1) * 4)
-            for index, name in enumerate(affect_names)
-        },
+        hidden_count=48,
+        neurons_per_affect=4,
     )
+    circuit = AffectiveCircuit(layout)
     affect = layout.slice(Population.AFFECT)
-    affect_count = circuit.neuron_count
+    affect_count = affect.stop - affect.start
     source = np.repeat(np.arange(input_count), affect_count)
     target_indices = np.tile(np.arange(affect.start, affect.stop), input_count)
     synapses = SparseSynapses(
@@ -110,10 +105,18 @@ def test_affective_spiking_circuit_aligns_to_targets() -> None:
 def test_affect_circuit_rejects_wrong_projection_geometry() -> None:
     import pytest
 
-    circuit = AffectiveCircuit()
+    layout = PopulationLayout.from_dimensions()
+    circuit = AffectiveCircuit(layout)
     with pytest.raises(ValueError):
         circuit.projection_prediction(
             SparseSynapses(np.array([0]), np.array([1]), np.array([0.1]), 2),
-            np.zeros((len(circuit.signal_names), 1, circuit.neurons_per_signal), dtype=int),
+            np.zeros(
+                (
+                    len(circuit.signal_names),
+                    1,
+                    layout.subgroup_width(Population.AFFECT),
+                ),
+                dtype=int,
+            ),
             np.zeros(2),
         )

@@ -41,6 +41,7 @@ T = TypeVar("T")
 class SpikingRuntime:
     """Compose network services while keeping one vectorised tick loop."""
 
+    # PopulationLayout should be the only record for neuron sizes.
     layout: PopulationLayout
     network: NetworkCore
     output_readout: EventReadout
@@ -55,9 +56,6 @@ class SpikingRuntime:
     background_drive: BackgroundDrive
     plugins: list[NetworkPlugin]
     _context: NetworkContext
-    input_features: int
-    output_tokens: tuple[str, ...]
-    neurons_per_token: int
     hidden_feature_groups: tuple[np.ndarray, ...]
     direct_input_output_edge_indices: np.ndarray
     hidden_output_edge_indices: np.ndarray
@@ -68,45 +66,17 @@ class SpikingRuntime:
     trainer: InputRunner
 
     def __init__(self, config: NetworkConfig) -> None:
-        input_features = config.input_features
-        hidden_neurons = config.hidden_neurons
-        output_tokens = config.output_tokens
-        assert output_tokens is not None
-        neurons_per_token = config.neurons_per_token
-        action_names = config.action_names
-        neurons_per_action = config.neurons_per_action
-        affect_names = config.affect_names
-        neurons_per_affect = config.neurons_per_affect
-        affect_start = input_features + hidden_neurons
-        action_start = affect_start + len(affect_names) * neurons_per_affect
-        char_start = action_start + len(action_names) * neurons_per_action
-        total = char_start + len(output_tokens) * neurons_per_token
-        layout = PopulationLayout(
-            input_count=input_features,
-            hidden_count=hidden_neurons,
-            affect_count=action_start - affect_start,
-            action_count=char_start - action_start,
-            char_count=total - char_start,
-            affect_subgroups={
-                n: slice(
-                    affect_start + i * neurons_per_affect,
-                    affect_start + (i + 1) * neurons_per_affect,
-                )
-                for i, n in enumerate(affect_names)
-            },
-            action_subgroups={
-                n: slice(
-                    action_start + i * neurons_per_action,
-                    action_start + (i + 1) * neurons_per_action,
-                )
-                for i, n in enumerate(action_names)
-            },
-            char_subgroups={
-                n: slice(
-                    char_start + i * neurons_per_token, char_start + (i + 1) * neurons_per_token
-                )
-                for i, n in enumerate(output_tokens)
-            },
+        self.layout = config.layout
+        input_features = self.layout.input_count
+        affect_bounds = self.layout.slice(Population.AFFECT)
+        action_bounds = self.layout.slice(Population.OUTPUT_ACTION)
+        char_bounds = self.layout.slice(Population.OUTPUT_CHAR)
+        total = self.layout.total_count
+        output_tokens = tuple(self.layout.char_subgroups)
+        affect_start, action_start, char_start = (
+            affect_bounds.start,
+            action_bounds.start,
+            char_bounds.start,
         )
         neurons = LIFNeurons(total, dt=1.0, tau_membrane=5.0, threshold=1.0, refractory_ticks=2)
         initializer = WeightInitializer(config.seed, config.weight_initialization)
@@ -117,11 +87,17 @@ class SpikingRuntime:
                 *(
                     np.stack(np.meshgrid(sources, targets, indexing="ij"), axis=-1).reshape(-1, 2)
                     for sources, targets in (
-                        (np.arange(input_features), np.arange(input_features, affect_start)),
+                        (
+                            np.arange(input_features),
+                            np.arange(input_features, affect_start),
+                        ),
                         (np.arange(input_features), np.arange(affect_start, action_start)),
                         (np.arange(input_features), np.arange(action_start, char_start)),
                         (np.arange(input_features), np.arange(char_start, total)),
-                        (np.arange(input_features, affect_start), np.arange(char_start, total)),
+                        (
+                            np.arange(input_features, affect_start),
+                            np.arange(char_start, total),
+                        ),
                         (
                             np.arange(affect_start, action_start),
                             np.arange(action_start, char_start),
@@ -152,8 +128,8 @@ class SpikingRuntime:
         for index, seed in enumerate(c.population_projections):
             if seed.source is Population.OUTPUT_CHAR:
                 raise ValueError("OUTPUT_CHAR cannot be a projection source")
-            source_bounds = layout.slice(seed.source)
-            target_bounds = layout.slice(seed.target)
+            source_bounds = self.layout.slice(seed.source)
+            target_bounds = self.layout.slice(seed.target)
             for contact in range(seed.contacts):
                 initializer.population_projection(
                     synapses,
@@ -183,7 +159,9 @@ class SpikingRuntime:
             c.input_affect_spread,
         )
         affect_indices = affect_edges.reshape(
-            input_features, len(affect_names), neurons_per_affect
+            input_features,
+            len(self.layout.affect_subgroups),
+            self.layout.subgroup_width(Population.AFFECT),
         ).transpose(1, 0, 2)
         affect_action_edges = synapses.weight.size
         projection(
@@ -215,18 +193,13 @@ class SpikingRuntime:
             c.hidden_output_mean,
             c.hidden_output_spread,
         )
-        network = NetworkCore(neurons, synapses)
-        self.input_features = input_features
-        self.output_tokens = output_tokens
-        self.neurons_per_token = neurons_per_token
-        self.layout = layout
-        self.network = network
-        self.output_readout = EventReadout(layout)
+        self.network = NetworkCore(neurons, synapses)
+        self.output_readout = EventReadout(self.layout)
         self.edge_enabled = np.ones(synapses.weight.size, dtype=bool)
         self.plasticity = RewardModulatedSTDP(synapses, learning_rate=config.learning_rate)
         self.response_session = ResponseSession(policy=config.session_policy)
-        self.metrics = RuntimeMetrics(layout)
-        self.homeostasis = PopulationHomeostasis(layout, config.homeostasis)
+        self.metrics = RuntimeMetrics(self.layout)
+        self.homeostasis = PopulationHomeostasis(self.layout, config.homeostasis)
         self.external_drive = ArrayDrive(total)
         self.background_drive = BackgroundDrive(
             total,
@@ -240,14 +213,14 @@ class SpikingRuntime:
             HomeostasisPlugin(self.homeostasis),
             PlasticityPlugin(self.plasticity),
         ]
-        self._context = NetworkContext(network.tick, neurons.voltage, neurons.voltage)
+        self._context = NetworkContext(self.network.tick, neurons.voltage, neurons.voltage)
         self.hidden_feature_groups = hidden_groups
         self.affect_edge_indices = affect_indices
         self.affect_action_edge_indices = affect_action_indices
         self.direct_input_output_edge_indices = direct
         self.hidden_output_edge_indices = hidden
         self.token_input_edge_indices = direct.reshape(
-            input_features, len(output_tokens), neurons_per_token
+            input_features, len(output_tokens), self.layout.subgroup_width(Population.OUTPUT_CHAR)
         )
         self.hidden_recurrent_edge_indices = np.flatnonzero(
             (synapses.source >= input_features)
@@ -339,9 +312,9 @@ class SpikingRuntime:
         self, frame: np.ndarray, context: np.ndarray | None = None, *, tonic_affect: bool = False
     ) -> np.ndarray:
         current = np.zeros(self.network.neurons.count)
-        current[: self.input_features] = frame
+        current[: self.layout.input_count] = frame
         if context is not None:
-            current[: self.input_features] += context
+            current[: self.layout.input_count] += context
         if tonic_affect and self.layout.affect_count:
             current[self.layout.slice(Population.AFFECT)] = 1.01
         return current
@@ -349,7 +322,7 @@ class SpikingRuntime:
     def boundary_current(self, signal: InputSignal, strength: float = 5.0) -> np.ndarray:
         if signal not in (InputSignal.INPUT_BEGIN, InputSignal.INPUT_END):
             raise ValueError(f"unknown input signal: {signal}")
-        current = np.zeros(self.input_features)
+        current = np.zeros(self.layout.input_count)
         current[0 if signal is InputSignal.INPUT_BEGIN else 1] = strength
         return self.current(current)
 

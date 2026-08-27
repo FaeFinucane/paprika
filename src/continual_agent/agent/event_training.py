@@ -39,7 +39,7 @@ class EventTrainingMixin:
         self: _EventTrainingHost, act: Action, target_events: Iterable[str]
     ) -> None:
         context = self.encoder.feature_vector(act.value)
-        blank = np.zeros(self.config.input_features)
+        blank = np.zeros(self.runtime.layout.input_count)
         self.runtime.trainer._prepare()
         try:
             for event_index, event in enumerate(target_events):

@@ -65,7 +65,7 @@ class ResponseMixin:
     def _frame_current(self: _ResponseHost, frame: np.ndarray) -> np.ndarray:
         current = self.runtime.current(frame, tonic_affect=True)
         if not self.runtime.response_session.policy.reset_working_memory:
-            current[: self.config.input_features] += self.working_memory.context_current()
+            current[: self.runtime.layout.input_count] += self.working_memory.context_current()
         return current
 
     def respond(self: _ResponseHost, text: str) -> Decision:
@@ -90,7 +90,7 @@ class ResponseMixin:
 
             if self.runtime.response_session.state.value != "responding":
                 self.runtime.response_session.begin_response()
-            blank = np.zeros(self.config.input_features)
+            blank = np.zeros(self.runtime.layout.input_count)
             action_event = None
             for _ in range(self.config.max_thinking_ticks):
                 emitted = self.runtime.step(self._frame_current(blank))
@@ -154,7 +154,9 @@ class ResponseMixin:
             if emitted_tokens >= limit:
                 break
             emitted = self.runtime.step(
-                self._frame_current(context if tick == 0 else np.zeros(self.config.input_features))
+                self._frame_current(
+                    context if tick == 0 else np.zeros(self.runtime.layout.input_count)
+                )
             )
             event = self.runtime.output_readout.observe(
                 emitted,

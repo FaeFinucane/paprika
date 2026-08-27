@@ -1,7 +1,8 @@
 import numpy as np
 
-from continual_agent.agent.conversation_agent import ConversationAgent, NetworkConfig
+from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.cognition.working_memory import WorkingMemory
+from tests.helpers import network_config
 
 
 def test_working_memory_persists_and_decays_across_turns() -> None:
@@ -23,7 +24,7 @@ def test_working_memory_reset_clears_context() -> None:
 
 
 def test_agent_retains_context_until_conversation_reset() -> None:
-    agent = ConversationAgent(NetworkConfig(input_features=16, seed=4))
+    agent = ConversationAgent(network_config(input_features=16, seed=4))
     agent.respond("I am comparing two programming languages.")
     before_reset = agent.working_memory.state.copy()
     agent.respond("Which one should I choose?")
@@ -38,7 +39,7 @@ def test_agent_retains_context_until_conversation_reset() -> None:
 
 
 def test_working_memory_persists_without_voltage_readout_evidence() -> None:
-    config = NetworkConfig(input_features=16, seed=9)
+    config = network_config(input_features=16, seed=9)
     with_context = ConversationAgent(config)
     without_context = ConversationAgent(config)
 

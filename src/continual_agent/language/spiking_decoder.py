@@ -25,29 +25,19 @@ class SpikingCharacterDecoder:
 
     def __init__(
         self,
-        alphabet: tuple[str, ...] = DEFAULT_ALPHABET,
-        neurons_per_token: int = 3,
+        layout: PopulationLayout,
         learning_rate: float = 0.08,
     ):
-        if not alphabet or neurons_per_token <= 0:
-            raise ValueError("alphabet and neurons_per_token are required")
-        self.alphabet = alphabet
-        self.tokens = ("<EOS>",) + alphabet
-        self.neurons_per_token = neurons_per_token
+        self.layout = layout
+        self.tokens = layout.subgroup_names(Population.OUTPUT_CHAR)
+        self.alphabet = tuple(token for token in self.tokens if token != "<EOS>")
         self.learning_rate = learning_rate
 
     @property
     def token_count(self) -> int:
         return len(self.tokens)
 
-    @property
-    def neuron_count(self) -> int:
-        return self.token_count * self.neurons_per_token
-
     def groups(self, layout: PopulationLayout) -> dict[str, np.ndarray]:
-        bounds = layout.slice(Population.OUTPUT_CHAR)
-        if bounds.stop - bounds.start != self.neuron_count:
-            raise ValueError("layout output_char population does not match decoder")
         return {
             token: np.arange(
                 layout.subgroup(Population.OUTPUT_CHAR, token).start,
@@ -66,20 +56,23 @@ class SpikingCharacterDecoder:
         block; the agent offsets them when adding the block to the network.
         """
 
+        if tuple(layout.char_subgroups) != self.tokens:
+            raise ValueError("layout output_char subgroups must match decoder tokens")
         token_bounds = layout.slice(Population.OUTPUT_CHAR)
-        if token_bounds.stop - token_bounds.start != self.neuron_count:
-            raise ValueError("layout output_char population does not match decoder")
         input_count = token_bounds.start
         # Edge IDs are relative to the appended block, but these bounds ensure
         # the IDs describe the supplied source and target populations.
         indices = np.empty(
-            (input_count, self.token_count, self.neurons_per_token),
+            (input_count, self.token_count, layout.subgroup_width(Population.OUTPUT_CHAR)),
             dtype=np.int64,
         )
         for feature in range(input_count):
             for token in range(self.token_count):
-                start = feature * self.neuron_count + token * self.neurons_per_token
-                indices[feature, token] = np.arange(start, start + self.neurons_per_token)
+                subgroup = layout.subgroup(Population.OUTPUT_CHAR, self.tokens[token])
+                start = feature * layout.char_count + token * layout.subgroup_width(
+                    Population.OUTPUT_CHAR
+                )
+                indices[feature, token] = np.arange(start, start + subgroup.stop - subgroup.start)
         return indices
 
     def align_next_token(
@@ -97,7 +90,7 @@ class SpikingCharacterDecoder:
         target_index = self.tokens.index(target)
         update = self.learning_rate * active_features
         selected_edges = edge_indices[:, target_index]
-        synapses.weight[selected_edges] += update[:, None] / self.neurons_per_token
+        synapses.weight[selected_edges] += update[:, None] / edge_indices.shape[2]
         synapses.weight[selected_edges] = np.clip(synapses.weight[selected_edges], -1.0, 1.0)
 
     def align_hidden_output_token(
@@ -125,7 +118,9 @@ class SpikingCharacterDecoder:
             raise ValueError("source must be finite")
         target_start = layout.subgroup(Population.OUTPUT_CHAR, target).start
         targets = synapses.target[edge_indices]
-        target_bounds = np.arange(target_start, target_start + self.neurons_per_token)
+        target_bounds = np.arange(
+            target_start, layout.subgroup(Population.OUTPUT_CHAR, target).stop
+        )
         selected = edge_indices[np.isin(targets, target_bounds)]
         if selected.size == 0:
             return

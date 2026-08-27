@@ -12,7 +12,8 @@ from continual_agent.simulation.population_layout import Population
 def test_baseline_current_does_not_activate_candidate_outputs() -> None:
     agent = ConversationAgent()
 
-    current = agent._frame_current(np.zeros(agent.config.input_features))
+    input_count = agent.runtime.layout.slice(Population.INPUT).stop
+    current = agent._frame_current(np.zeros(input_count))
 
     np.testing.assert_array_equal(
         current[agent.runtime.layout.slice(Population.OUTPUT_ACTION)], 0.0
@@ -24,7 +25,8 @@ def test_baseline_current_does_not_activate_candidate_outputs() -> None:
 def test_nonblank_current_does_not_tonic_drive_action_outputs() -> None:
     agent = ConversationAgent()
 
-    current = agent._frame_current(np.ones(agent.config.input_features))
+    input_count = agent.runtime.layout.slice(Population.INPUT).stop
+    current = agent._frame_current(np.ones(input_count))
 
     np.testing.assert_array_equal(
         current[agent.runtime.layout.slice(Population.OUTPUT_ACTION)], 0.0
@@ -100,7 +102,7 @@ def test_failed_raw_input_stream_cleans_up_runtime() -> None:
         agent.run_input_events(
             (
                 InputSignal.INPUT_BEGIN,
-                np.zeros(agent.config.input_features),
+                np.zeros(agent.runtime.layout.slice(Population.INPUT).stop),
                 InputSignal.INPUT_BEGIN,
             ),
             response_ticks=1,

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+
 # Remove this class and associated logic. We aren't actually using Conversation Agent yet and are still just focused on the synthetic agent, which doesn't use this.
 @dataclass
 class WorkingMemory:

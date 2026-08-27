@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from continual_agent.agent.conversation_agent import ConversationAgent, NetworkConfig
+from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.cognition.readout import OutputEvent
 from continual_agent.evaluation.event_stream import (
     EventOutcome,
@@ -13,6 +13,7 @@ from continual_agent.evaluation.event_stream import (
     evaluate_event_stream,
 )
 from continual_agent.simulation.population_layout import Population
+from tests.helpers import network_config
 
 
 def test_early_reward_schedule_is_asymmetric_and_event_level() -> None:
@@ -97,7 +98,7 @@ def test_early_timing_is_open_by_default_but_can_be_configured() -> None:
 
 
 def test_configured_event_rewards_are_consumed_by_plasticity_and_ledger() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=12))
+    agent = ConversationAgent(network_config(seed=12))
     agent.runtime.plasticity.eligibility.fill(1.0)
     config = EventStreamConfig(
         correct_reward=2.0,
@@ -122,7 +123,7 @@ def test_configured_event_rewards_are_consumed_by_plasticity_and_ledger() -> Non
 
 
 def test_event_reward_outcomes_remain_distinct_in_the_consumed_ledger() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=13))
+    agent = ConversationAgent(network_config(seed=13))
     config = EventStreamConfig(patience_window=1)
     reports = (
         evaluate_event_stream(("m",), (event("m", 0),), config=config),

@@ -56,9 +56,8 @@ def frame() -> np.ndarray:
 
 
 def test_action_readout_only_exposes_named_layout_groups() -> None:
-    readout = ActionReadout()
-
     current = make_layout()
+    readout = ActionReadout(current)
     groups = readout.groups(current)
 
     assert groups[Action.ANSWER].tolist() == list(

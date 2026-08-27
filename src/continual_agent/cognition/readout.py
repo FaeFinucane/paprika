@@ -30,6 +30,7 @@ class Decision:
     evidence: dict[Action, float]
     timed_out: bool
 
+
 # If we make one EventReadout per-population, then we don't need to store population on OutputEvent, we'll know which one it is
 # based on which event readout we're reading from.
 @dataclass(frozen=True)
@@ -50,6 +51,7 @@ class OutputEvent:
     def label(self) -> str:
         return self.name
 
+
 # OutputCandidate seems like internal-only logic that doesn't need to be a whole extra class.
 @dataclass(frozen=True)
 class OutputCandidate:
@@ -63,6 +65,7 @@ class OutputCandidate:
     @property
     def is_eos(self) -> bool:
         return self.population is Population.OUTPUT_CHAR and self.name == "<EOS>"
+
 
 # ArbitrationDecision is also internal-only
 @dataclass(frozen=True)
@@ -119,6 +122,7 @@ class OutputArbitrationPolicy:
 
         selected = max(candidates, key=rank)
         return ArbitrationDecision(selected, candidates, "selected")
+
 
 # EventReadout could almost be a plugin couldn't it? All it needs to do is observe spikes on every tick.
 class EventReadout:
@@ -222,23 +226,15 @@ class ActionReadout:
 
     def __init__(
         self,
-        actions: tuple[Action, ...] = tuple(Action),
-        neurons_per_action: int = 4,
+        layout: PopulationLayout,
     ):
-        if not actions or neurons_per_action <= 0:
-            raise ValueError("actions and neurons_per_action must be non-empty")
-        self.actions = actions
-        self.neurons_per_action = neurons_per_action
-
-    @property
-    def neuron_count(self) -> int:
-        return len(self.actions) * self.neurons_per_action
+        self.layout = layout
+        self.actions = tuple(
+            Action(name) for name in layout.subgroup_names(Population.OUTPUT_ACTION)
+        )
 
     def groups(self, layout: PopulationLayout) -> dict[Action, np.ndarray]:
         """Return the layout's named action subgroups."""
-        bounds = layout.slice(Population.OUTPUT_ACTION)
-        if bounds.stop - bounds.start != self.neuron_count:
-            raise ValueError("layout output_action population does not match readout")
         try:
             return {
                 action: np.arange(

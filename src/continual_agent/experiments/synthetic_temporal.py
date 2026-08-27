@@ -19,7 +19,7 @@ from continual_agent.evaluation.event_stream import (
     evaluate_event_stream,
 )
 from continual_agent.evaluation.reward import RewardLedger
-from continual_agent.simulation.population_layout import Population
+from continual_agent.simulation.population_layout import Population, PopulationLayout
 from continual_agent.simulation.weight_initialization import WeightInitializationConfig
 
 
@@ -234,10 +234,12 @@ def _make_runtime(
     )
     agent = SpikingRuntime(
         NetworkConfig(
-            input_features=len(config.alphabet) + 2,
-            hidden_neurons=config.hidden_neurons,
-            output_tokens=("<EOS>", *config.alphabet),
-            neurons_per_token=2,
+            layout=PopulationLayout.from_dimensions(
+                input_count=len(config.alphabet) + 2,
+                hidden_count=config.hidden_neurons,
+                output_tokens=("<EOS>", *config.alphabet),
+                neurons_per_token=2,
+            ),
             seed=seed,
             weight_initialization=config.weight_initialization,
             background_rate=background_rate,

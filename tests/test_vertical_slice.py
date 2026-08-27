@@ -1,8 +1,7 @@
 import numpy as np
 import pytest
 
-from continual_agent.agent.conversation_agent import ConversationAgent, NetworkConfig
-from continual_agent.agent.network_config import NetworkConfig
+from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.agent.session import (
     ConflictPolicy,
     InputSignal,
@@ -18,11 +17,12 @@ from continual_agent.environment.scenarios import default_scenarios
 from continual_agent.plasticity.stdp import RewardModulatedSTDP
 from continual_agent.simulation.population_layout import Population
 from continual_agent.simulation.synapses import SparseSynapses
+from tests.helpers import network_config
 
 
 def test_runtime_boundaries_drive_distinct_input_channels() -> None:
     runtime = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -41,7 +41,7 @@ def test_runtime_boundaries_drive_distinct_input_channels() -> None:
 
 def test_background_drive_is_seeded_and_vectorized() -> None:
     first = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -52,7 +52,7 @@ def test_background_drive_is_seeded_and_vectorized() -> None:
         )
     )
     second = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -71,7 +71,7 @@ def test_background_drive_is_seeded_and_vectorized() -> None:
 
 def test_normal_output_pathways_are_not_zeroed() -> None:
     runtime = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -88,7 +88,7 @@ def test_normal_output_pathways_are_not_zeroed() -> None:
 
 def test_boundary_current_is_neural_and_not_a_semantic_feature() -> None:
     runtime = SpikingRuntime(
-        NetworkConfig(
+        network_config(
             input_features=4,
             hidden_neurons=4,
             output_tokens=("<EOS>", "A"),
@@ -168,7 +168,7 @@ def test_session_rejects_input_frames_outside_boundaries() -> None:
 
 
 def test_agent_applies_boundary_policy_and_captures_execution_snapshot() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=3, persistent_working_memory=True))
+    agent = ConversationAgent(network_config(seed=3, persistent_working_memory=True))
     agent.runtime.response_session.policy = SessionPolicy(
         reset_readout=True,
         reset_membrane=True,
@@ -199,7 +199,7 @@ def test_agent_applies_boundary_policy_and_captures_execution_snapshot() -> None
 
 
 def test_missing_response_eos_aborts_the_agent_session() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=4))
+    agent = ConversationAgent(network_config(seed=4))
 
     response = agent.generate_response(Action.ANSWER, max_tokens=0)
 
@@ -209,7 +209,7 @@ def test_missing_response_eos_aborts_the_agent_session() -> None:
 
 
 def test_response_exception_cleans_up_session() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=4))
+    agent = ConversationAgent(network_config(seed=4))
     original = agent.runtime.step
 
     def fail(current: np.ndarray) -> np.ndarray:
@@ -223,7 +223,7 @@ def test_response_exception_cleans_up_session() -> None:
 
 
 def test_agent_input_presentation_closes_before_response() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=5, max_thinking_ticks=1))
+    agent = ConversationAgent(network_config(seed=5, max_thinking_ticks=1))
 
     agent.respond("hello")
 
@@ -232,7 +232,7 @@ def test_agent_input_presentation_closes_before_response() -> None:
 
 
 def test_zero_token_limit_is_explicit_exhaustion_without_network_ticks() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=6))
+    agent = ConversationAgent(network_config(seed=6))
 
     response = agent.generate_response(Action.ANSWER, max_tokens=0)
 
@@ -262,7 +262,7 @@ def test_reward_modulated_stdp_changes_only_selected_targets() -> None:
 
 
 def test_isolated_sessions_do_not_share_execution_state_and_merge_explicitly() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=17, max_thinking_ticks=1))
+    agent = ConversationAgent(network_config(seed=17, max_thinking_ticks=1))
     before_weights = agent.runtime.network.synapses.weight.copy()
     before_voltage = agent.runtime.network.neurons.voltage.copy()
 
@@ -285,7 +285,7 @@ def test_isolated_sessions_do_not_share_execution_state_and_merge_explicitly() -
 
 
 def test_isolated_response_does_not_merge_non_weight_state() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=18, max_thinking_ticks=1))
+    agent = ConversationAgent(network_config(seed=18, max_thinking_ticks=1))
     before_tick = agent.runtime.network.tick
     before_snapshot = agent.debug_snapshot()
 
@@ -298,7 +298,7 @@ def test_isolated_response_does_not_merge_non_weight_state() -> None:
 
 
 def test_isolated_execution_does_not_merge_by_default() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=19, max_thinking_ticks=1))
+    agent = ConversationAgent(network_config(seed=19, max_thinking_ticks=1))
     before = agent.runtime.network.synapses.weight.copy()
 
     _, execution = agent.train_response_isolated("hello", Action.ANSWER)
@@ -308,7 +308,7 @@ def test_isolated_execution_does_not_merge_by_default() -> None:
 
 
 def test_isolated_execution_copies_output_arbitration_policy() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=20))
+    agent = ConversationAgent(network_config(seed=20))
     policy = agent.runtime.output_readout.arbitration
 
     def mutate_policy(isolated: ConversationAgent) -> None:
@@ -321,7 +321,7 @@ def test_isolated_execution_copies_output_arbitration_policy() -> None:
 
 
 def test_scripted_curriculum_learns_all_initial_intents() -> None:
-    agent = ConversationAgent(NetworkConfig(seed=0))
+    agent = ConversationAgent(network_config(seed=0))
     scenarios = default_scenarios()
 
     for _ in range(30):
