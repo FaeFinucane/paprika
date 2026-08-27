@@ -10,6 +10,7 @@ import numpy as np
 from continual_agent.agent.config import AgentConfig
 from continual_agent.agent.debug import DebugSnapshot
 from continual_agent.agent.event_training import EventTrainingMixin
+from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.response import ResponseMixin
 from continual_agent.agent.session import (
     ConflictPolicy,
@@ -42,27 +43,29 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
             neurons_per_token=self.config.neurons_per_token,
         )
         self.runtime = SpikingRuntime(
-            input_features=self.config.input_features,
-            hidden_neurons=self.config.hidden_neurons,
-            output_tokens=self.language.tokens,
-            neurons_per_token=self.config.neurons_per_token,
-            action_names=tuple(action.value for action in self.actions),
-            neurons_per_action=self.config.neurons_per_action,
-            affect_names=AffectiveCircuit.signal_names,
-            neurons_per_affect=self.config.neurons_per_affect,
-            connection_probability=self.config.connection_probability,
-            seed=self.config.seed,
-            session_policy=SessionPolicy(
-                reset_neuron_state=not self.config.persistent_working_memory,
-                reset_synaptic_activity=not self.config.persistent_working_memory,
-                persist_working_memory=self.config.persistent_working_memory,
+            NetworkConfig(
+                input_features=self.config.input_features,
+                hidden_neurons=self.config.hidden_neurons,
+                output_tokens=self.language.tokens,
+                neurons_per_token=self.config.neurons_per_token,
+                action_names=tuple(action.value for action in self.actions),
+                neurons_per_action=self.config.neurons_per_action,
+                affect_names=AffectiveCircuit.signal_names,
+                neurons_per_affect=self.config.neurons_per_affect,
+                connection_probability=self.config.connection_probability,
+                seed=self.config.seed,
+                session_policy=SessionPolicy(
+                    reset_neuron_state=not self.config.persistent_working_memory,
+                    reset_synaptic_activity=not self.config.persistent_working_memory,
+                    persist_working_memory=self.config.persistent_working_memory,
+                ),
+                homeostasis_enabled=self.config.homeostasis_enabled,
+                homeostasis_target_rate=self.config.homeostasis_target_rate,
+                homeostasis_strength=self.config.homeostasis_strength,
+                homeostasis_update_interval=self.config.homeostasis_update_interval,
+                homeostasis_max_current=self.config.homeostasis_max_current,
+                homeostasis_populations=self.config.homeostasis_populations,
             ),
-            homeostasis_enabled=self.config.homeostasis_enabled,
-            homeostasis_target_rate=self.config.homeostasis_target_rate,
-            homeostasis_strength=self.config.homeostasis_strength,
-            homeostasis_update_interval=self.config.homeostasis_update_interval,
-            homeostasis_max_current=self.config.homeostasis_max_current,
-            homeostasis_populations=self.config.homeostasis_populations,
         )
         self.encoder = TextEncoder(
             self.config.input_features,

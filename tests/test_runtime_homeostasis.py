@@ -1,5 +1,6 @@
 import numpy as np
 
+from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.population_homeostasis import PopulationHomeostasis
 from continual_agent.agent.runtime_metrics import RuntimeMetrics
 from continual_agent.agent.spiking_runtime import SpikingRuntime
@@ -48,13 +49,15 @@ def test_homeostasis_moves_toward_target_and_is_bounded() -> None:
 
 def test_homeostasis_does_not_change_stdp_specialization() -> None:
     runtime = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=4,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=7,
-        homeostasis_enabled=True,
-        homeostasis_update_interval=1,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=7,
+            homeostasis_enabled=True,
+            homeostasis_update_interval=1,
+        )
     )
     before = runtime.network.synapses.weight.copy()
     for _ in range(8):
@@ -66,15 +69,17 @@ def test_homeostasis_does_not_change_stdp_specialization() -> None:
 def test_enabled_homeostasis_is_deterministic_for_a_seed() -> None:
     def make_runtime() -> SpikingRuntime:
         return SpikingRuntime(
-            input_features=4,
-            hidden_neurons=4,
-            output_tokens=("<EOS>", "A"),
-            neurons_per_token=1,
-            seed=11,
-            background_rate=0.5,
-            background_current=0.4,
-            homeostasis_enabled=True,
-            homeostasis_update_interval=2,
+            NetworkConfig(
+                input_features=4,
+                hidden_neurons=4,
+                output_tokens=("<EOS>", "A"),
+                neurons_per_token=1,
+                seed=11,
+                background_rate=0.5,
+                background_current=0.4,
+                homeostasis_enabled=True,
+                homeostasis_update_interval=2,
+            )
         )
 
     first = make_runtime()

@@ -7,18 +7,16 @@ from typing import Any, Callable, Iterable, TypeVar
 import numpy as np
 
 from continual_agent.agent.input_runner import InputRunner
-from continual_agent.agent.network_factory import NetworkFactory
+from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.plugins import NetworkContext
 from continual_agent.agent.runtime_session import RuntimeSession
 from continual_agent.agent.session import (
     ConflictPolicy,
     InputSignal,
     SessionExecutionSnapshot,
-    SessionPolicy,
 )
 from continual_agent.cognition.readout import OutputEvent
 from continual_agent.simulation.population_layout import Population
-from continual_agent.simulation.weight_initialization import WeightInitializationConfig
 
 T = TypeVar("T")
 
@@ -52,54 +50,8 @@ class SpikingRuntime:
     affect_action_edge_indices: Any
     trainer: Any
 
-    def __init__(
-        self,
-        *,
-        input_features: int,
-        hidden_neurons: int,
-        output_tokens: tuple[str, ...],
-        neurons_per_token: int,
-        action_names: tuple[str, ...] = (),
-        neurons_per_action: int = 1,
-        affect_names: tuple[str, ...] = (),
-        neurons_per_affect: int = 1,
-        connection_probability: float = 0.08,
-        seed: int = 0,
-        weight_initialization: WeightInitializationConfig | None = None,
-        learning_rate: float = 0.08,
-        background_rate: float = 0.0,
-        background_current: float = 0.05,
-        session_policy: SessionPolicy | None = None,
-        homeostasis_enabled: bool = False,
-        homeostasis_target_rate: float = 0.1,
-        homeostasis_strength: float = 0.01,
-        homeostasis_update_interval: int = 100,
-        homeostasis_max_current: float = 0.25,
-        homeostasis_populations: tuple[Population, ...] = (Population.HIDDEN,),
-    ) -> None:
-        bundle = NetworkFactory(
-            input_features=input_features,
-            hidden_neurons=hidden_neurons,
-            output_tokens=output_tokens,
-            neurons_per_token=neurons_per_token,
-            action_names=action_names,
-            neurons_per_action=neurons_per_action,
-            affect_names=affect_names,
-            neurons_per_affect=neurons_per_affect,
-            connection_probability=connection_probability,
-            seed=seed,
-            weight_initialization=weight_initialization,
-            learning_rate=learning_rate,
-            background_rate=background_rate,
-            background_current=background_current,
-            session_policy=session_policy or SessionPolicy(),
-            homeostasis_enabled=homeostasis_enabled,
-            homeostasis_target_rate=homeostasis_target_rate,
-            homeostasis_strength=homeostasis_strength,
-            homeostasis_update_interval=homeostasis_update_interval,
-            homeostasis_max_current=homeostasis_max_current,
-            homeostasis_populations=homeostasis_populations,
-        ).build()
+    def __init__(self, config: NetworkConfig) -> None:
+        bundle = config.build()
         self.__dict__.update(bundle.__dict__)
         self._context = bundle.context
         self.session = RuntimeSession(self)

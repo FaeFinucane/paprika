@@ -16,13 +16,13 @@ The default configuration has 188 neurons:
 
 | Population | Size | Purpose | Implementation |
 | --- | ---: | --- | --- |
-| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled by `src/continual_agent/agent/network_factory.py` |
+| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled by `src/continual_agent/agent/network_config.py` |
 | `HIDDEN` | 48 | Recurrent internal state | `src/continual_agent/simulation/core.py`; layout in `src/continual_agent/simulation/population_layout.py` |
 | `AFFECT` | 7 x 4 = 28 | Neural populations for valence, arousal, uncertainty, curiosity, threat, competence, and social affiliation | `src/continual_agent/cognition/affect_circuit.py` and `src/continual_agent/cognition/affect.py` |
-| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed by `src/continual_agent/agent/network_factory.py` |
+| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed by `src/continual_agent/agent/network_config.py` |
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
-`AgentConfig` controls these dimensions. `NetworkFactory` owns layout,
+`AgentConfig` controls these dimensions. `NetworkConfig` owns construction fields and layout,
 neuron, synapse, drive, plugin, and readout construction; the dedicated
 `WeightInitializer` owns validated weight distributions, bootstrap contacts,
 and stable named RNG streams. It
@@ -125,7 +125,7 @@ See [training](TRAINING.md), [tasks](TASKS.md), and the
 
 `NetworkCore` owns vectorised LIF neurons, sparse synapses, pending current,
 tick/reset, and snapshots. It uses reusable spike buffers and does not retain
-spike history. `NetworkFactory` constructs that core and the runtime services in
+spike history. `NetworkConfig` constructs that core and the runtime services in
 one `NetworkBundle`; neither the bundle nor `SpikingRuntime` keeps second neuron
 or synapse aliases, and no legacy aliases are supported. `BackgroundDrive` owns
 its stochastic-drive configuration and state.

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import cast
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -63,22 +62,41 @@ class NetworkBundle:
     recurrent_event_edge_indices: np.ndarray
 
 
-class NetworkFactory:
+@dataclass
+class NetworkConfig:
     """Build layout, projections, state, drives, and scheduled plugins."""
 
-    def __init__(self, **options: object) -> None:
-        self.options = options
+    input_features: int
+    hidden_neurons: int
+    output_tokens: tuple[str, ...]
+    neurons_per_token: int
+    action_names: tuple[str, ...] = ()
+    neurons_per_action: int = 1
+    affect_names: tuple[str, ...] = ()
+    neurons_per_affect: int = 1
+    connection_probability: float = 0.08
+    seed: int = 0
+    weight_initialization: WeightInitializationConfig | None = None
+    learning_rate: float = 0.08
+    background_rate: float = 0.0
+    background_current: float = 0.05
+    session_policy: SessionPolicy = field(default_factory=SessionPolicy)
+    homeostasis_enabled: bool = False
+    homeostasis_target_rate: float = 0.1
+    homeostasis_strength: float = 0.01
+    homeostasis_update_interval: int = 100
+    homeostasis_max_current: float = 0.25
+    homeostasis_populations: tuple[Population, ...] = (Population.HIDDEN,)
 
     def build(self) -> NetworkBundle:
-        o = self.options
-        input_features = cast(int, o["input_features"])
-        hidden_neurons = cast(int, o["hidden_neurons"])
-        output_tokens = cast(tuple[str, ...], o["output_tokens"])
-        neurons_per_token = cast(int, o["neurons_per_token"])
-        action_names = cast(tuple[str, ...], o["action_names"])
-        neurons_per_action = cast(int, o["neurons_per_action"])
-        affect_names = cast(tuple[str, ...], o["affect_names"])
-        neurons_per_affect = cast(int, o["neurons_per_affect"])
+        input_features = self.input_features
+        hidden_neurons = self.hidden_neurons
+        output_tokens = self.output_tokens
+        neurons_per_token = self.neurons_per_token
+        action_names = self.action_names
+        neurons_per_action = self.neurons_per_action
+        affect_names = self.affect_names
+        neurons_per_affect = self.neurons_per_affect
         if input_features <= BOUNDARY_CHANNEL_COUNT:
             raise ValueError("input_features must leave room for boundary channels")
         affect_start = input_features + hidden_neurons
@@ -113,12 +131,9 @@ class NetworkFactory:
             },
         )
         neurons = LIFNeurons(total, dt=1.0, tau_membrane=5.0, threshold=1.0, refractory_ticks=2)
-        seed = cast(int, o["seed"])
-        initializer = WeightInitializer(
-            seed, cast(WeightInitializationConfig | None, o.get("weight_initialization"))
-        )
+        initializer = WeightInitializer(self.seed, self.weight_initialization)
         c = initializer.config
-        synapses = initializer.random_synapses(total, cast(float, o["connection_probability"]))
+        synapses = initializer.random_synapses(total, self.connection_probability)
         initial_edges = synapses.weight.size
         hidden_groups = tuple(
             np.asarray(g, dtype=np.int64)
@@ -201,27 +216,28 @@ class NetworkFactory:
         metrics = RuntimeMetrics(layout)
         homeostasis = PopulationHomeostasis(
             layout,
-            enabled=cast(bool, o["homeostasis_enabled"]),
-            target_rate=cast(float, o["homeostasis_target_rate"]),
-            strength=cast(float, o["homeostasis_strength"]),
-            update_interval=cast(int, o["homeostasis_update_interval"]),
-            max_current=cast(float, o["homeostasis_max_current"]),
-            populations=cast(tuple[Population, ...], o["homeostasis_populations"]),
+            enabled=self.homeostasis_enabled,
+            target_rate=self.homeostasis_target_rate,
+            strength=self.homeostasis_strength,
+            update_interval=self.homeostasis_update_interval,
+            max_current=self.homeostasis_max_current,
+            populations=self.homeostasis_populations,
         )
         external = ArrayDrive(total)
         drives = DriveAggregator(total)
         drives.add(external)
         background = BackgroundDrive(
             total,
-            cast(float, o["background_rate"]),
-            cast(float, o["background_current"]),
+            self.background_rate,
+            self.background_current,
             initializer.seed_for("background"),
         )
         drives.add(background)
         drives.add(HomeostasisDrive(homeostasis))
-        plasticity = RewardModulatedSTDP(synapses, learning_rate=cast(float, o["learning_rate"]))
+        plasticity = RewardModulatedSTDP(synapses, learning_rate=self.learning_rate)
+        metrics_plugin = MetricsPlugin(metrics)
         plugins: list[NetworkPlugin] = [
-            MetricsPlugin(metrics),
+            metrics_plugin,
             HomeostasisPlugin(homeostasis),
             PlasticityPlugin(plasticity),
         ]
@@ -234,14 +250,14 @@ class NetworkFactory:
             EventReadout(layout),
             np.ones(synapses.weight.size, dtype=bool),
             plasticity,
-            ResponseSession(policy=cast(SessionPolicy, o["session_policy"])),
+            ResponseSession(policy=self.session_policy),
             metrics,
             homeostasis,
             external,
             background,
             drives,
             plugins,
-            cast(MetricsPlugin, plugins[0]),
+            metrics_plugin,
             NetworkContext(network.tick, neurons.voltage, neurons.voltage),
             hidden_groups,
             input_hidden,

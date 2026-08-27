@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .conversation_agent import ConversationAgent
+    from .network_config import NetworkConfig
     from .spiking_runtime import SpikingRuntime
 
 
@@ -16,7 +17,11 @@ def __getattr__(name: str):
         from .spiking_runtime import SpikingRuntime
 
         return SpikingRuntime
+    if name == "NetworkConfig":
+        from .network_config import NetworkConfig
+
+        return NetworkConfig
     raise AttributeError(name)
 
 
-__all__ = ["ConversationAgent", "SpikingRuntime"]
+__all__ = ["ConversationAgent", "NetworkConfig", "SpikingRuntime"]

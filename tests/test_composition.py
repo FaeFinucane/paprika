@@ -1,8 +1,10 @@
+from copy import deepcopy
+
 import numpy as np
 
 from continual_agent.agent.drives import ArrayDrive, DriveAggregator
 from continual_agent.agent.input_runner import InputRunner
-from continual_agent.agent.network_factory import NetworkFactory
+from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.plugins import NetworkContext
 from continual_agent.agent.runtime_session import RuntimeSession
 from continual_agent.agent.spiking_runtime import SpikingRuntime
@@ -58,13 +60,15 @@ def test_network_plugin_context_can_be_scheduled_without_neuron_loops() -> None:
     assert [context.tick for context in seen] == [2, 4]
 
 
-def test_runtime_composes_owned_factory_session_and_runner_components() -> None:
+def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     runtime = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=3,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=8,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=3,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=8,
+        )
     )
 
     assert isinstance(runtime.session, RuntimeSession)
@@ -75,6 +79,9 @@ def test_runtime_composes_owned_factory_session_and_runner_components() -> None:
     assert not hasattr(runtime, "background_current")
     assert runtime.background_drive.rate == 0.0
     assert runtime.background_drive.current == 0.05
-    assert isinstance(NetworkFactory(input_features=4), NetworkFactory)
+    config = NetworkConfig(4, 3, ("<EOS>", "A"), 1)
+    before = deepcopy(config)
+    config.build()
+    assert config == before
     assert not hasattr(runtime, "_diagnostic_ticks")
     assert runtime.metrics.ticks == 0

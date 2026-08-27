@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
+from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.session import (
     ConflictPolicy,
     InputSignal,
@@ -22,11 +23,13 @@ from continual_agent.simulation.synapses import SparseSynapses
 
 def test_runtime_boundaries_drive_distinct_input_channels() -> None:
     runtime = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=4,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=2,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=2,
+        )
     )
     runtime.start_session()
     begin = runtime.step_input_signal(InputSignal.INPUT_BEGIN)
@@ -39,22 +42,26 @@ def test_runtime_boundaries_drive_distinct_input_channels() -> None:
 
 def test_background_drive_is_seeded_and_vectorized() -> None:
     first = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=4,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=21,
-        background_rate=0.5,
-        background_current=0.4,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=21,
+            background_rate=0.5,
+            background_current=0.4,
+        )
     )
     second = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=4,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=21,
-        background_rate=0.5,
-        background_current=0.4,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=21,
+            background_rate=0.5,
+            background_current=0.4,
+        )
     )
     current = np.zeros(first.network.neurons.count)
     first_spikes = [first.step(current) for _ in range(8)]
@@ -65,11 +72,13 @@ def test_background_drive_is_seeded_and_vectorized() -> None:
 
 def test_normal_output_pathways_are_not_zeroed() -> None:
     runtime = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=4,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=22,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=22,
+        )
     )
     output = runtime.layout.slice(Population.OUTPUT_CHAR)
     incoming = (runtime.network.synapses.target >= output.start) & (
@@ -80,11 +89,13 @@ def test_normal_output_pathways_are_not_zeroed() -> None:
 
 def test_boundary_current_is_neural_and_not_a_semantic_feature() -> None:
     runtime = SpikingRuntime(
-        input_features=4,
-        hidden_neurons=4,
-        output_tokens=("<EOS>", "A"),
-        neurons_per_token=1,
-        seed=9,
+        NetworkConfig(
+            input_features=4,
+            hidden_neurons=4,
+            output_tokens=("<EOS>", "A"),
+            neurons_per_token=1,
+            seed=9,
+        )
     )
     runtime.start_session()
     boundary = runtime.boundary_current(InputSignal.INPUT_END)

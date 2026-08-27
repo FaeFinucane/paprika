@@ -8,7 +8,7 @@ This is a small NumPy SNN prototype, not a general sequence learner or chatbot.
 - `NetworkCore` (`src/continual_agent/simulation/core.py`) owns vectorized LIF
   state, sparse synapses, one-tick delayed pending current, reset, and snapshots.
   It has reusable spike buffers, not spike history.
-- `NetworkFactory` (`src/continual_agent/agent/network_factory.py`) is the sole
+- `NetworkConfig` (`src/continual_agent/agent/network_config.py`) is the sole
   builder for `PopulationLayout`, projections, readout, plasticity, drives, and
   plugins, returned as one `NetworkBundle`.
 - `SpikingRuntime` (`src/continual_agent/agent/spiking_runtime.py`) is the

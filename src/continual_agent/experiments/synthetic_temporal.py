@@ -9,6 +9,7 @@ from typing import Iterable, Sequence
 
 import numpy as np
 
+from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.session import InputSignal
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.cognition.readout import OutputEvent
@@ -213,19 +214,21 @@ def _make_runtime(
         config.stdp_background_current if stdp_background else config.background_current
     )
     agent = SpikingRuntime(
-        input_features=len(config.alphabet) + 2,
-        hidden_neurons=config.hidden_neurons,
-        output_tokens=("<EOS>", *config.alphabet),
-        neurons_per_token=2,
-        seed=seed,
-        weight_initialization=config.weight_initialization,
-        background_rate=background_rate,
-        background_current=background_current,
-        homeostasis_enabled=config.homeostasis_enabled,
-        homeostasis_target_rate=config.homeostasis_target_rate,
-        homeostasis_strength=config.homeostasis_strength,
-        homeostasis_update_interval=config.homeostasis_update_interval,
-        homeostasis_max_current=config.homeostasis_max_current,
+        NetworkConfig(
+            input_features=len(config.alphabet) + 2,
+            hidden_neurons=config.hidden_neurons,
+            output_tokens=("<EOS>", *config.alphabet),
+            neurons_per_token=2,
+            seed=seed,
+            weight_initialization=config.weight_initialization,
+            background_rate=background_rate,
+            background_current=background_current,
+            homeostasis_enabled=config.homeostasis_enabled,
+            homeostasis_target_rate=config.homeostasis_target_rate,
+            homeostasis_strength=config.homeostasis_strength,
+            homeostasis_update_interval=config.homeostasis_update_interval,
+            homeostasis_max_current=config.homeostasis_max_current,
+        ),
     )
     agent.network.neurons.tau_membrane = 3.0
     agent.network.neurons.refractory_ticks = 1

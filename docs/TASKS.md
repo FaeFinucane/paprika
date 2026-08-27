@@ -59,7 +59,7 @@ cleanup decisions are intentionally not listed as active tasks.
 - Move weight initialization behind a dedicated validated configuration/object
   (for example `weight_initialization.py`) owned by the network construction
   path. Keep experiment-specific choices in `TemporalExperimentConfig`, pass
-  them into `NetworkFactory`, and remove synthetic post-build weight mutation.
+  them into `NetworkConfig`, and remove synthetic post-build weight mutation.
   Preserve deterministic named RNG streams, the global weight bound, and tests
   for label-symmetric output seeding and reproducibility.
 - Use the existing sparse weight-delta/session snapshots to distinguish
