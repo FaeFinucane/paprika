@@ -62,14 +62,14 @@ class NetworkBundle:
 class NetworkConfig:
     """Build layout, projections, state, drives, and scheduled plugins."""
 
-    input_features: int
-    hidden_neurons: int
-    output_tokens: tuple[str, ...]
-    neurons_per_token: int
+    input_features: int = 48
+    hidden_neurons: int = 48
+    output_tokens: tuple[str, ...] | None = None
+    neurons_per_token: int = 3
     action_names: tuple[str, ...] = ()
-    neurons_per_action: int = 1
+    neurons_per_action: int = 4
     affect_names: tuple[str, ...] = ()
-    neurons_per_affect: int = 1
+    neurons_per_affect: int = 4
     connection_probability: float = 0.08
     seed: int = 0
     weight_initialization: WeightInitializationConfig | None = None
@@ -78,8 +78,16 @@ class NetworkConfig:
     background_current: float = 0.05
     session_policy: SessionPolicy = field(default_factory=SessionPolicy)
     homeostasis: HomeostasisConfig = field(default_factory=HomeostasisConfig)
+    max_thinking_ticks: int = 18
+    max_response_tokens: int = 48
+    max_response_ticks: int = 144
+    presentation_speed: int = 1
+    persistent_working_memory: bool = True
+    language_alphabet: tuple[str, ...] = ("m", "a", "b", " ", "d", "n", "o", "i", ".", "?", "!")
 
     def __post_init__(self) -> None:
+        if self.output_tokens is None:
+            self.output_tokens = ("<EOS>",) + self.language_alphabet
         integer_fields = (
             "input_features",
             "hidden_neurons",
@@ -149,6 +157,7 @@ class NetworkConfig:
         input_features = self.input_features
         hidden_neurons = self.hidden_neurons
         output_tokens = self.output_tokens
+        assert output_tokens is not None
         neurons_per_token = self.neurons_per_token
         action_names = self.action_names
         neurons_per_action = self.neurons_per_action

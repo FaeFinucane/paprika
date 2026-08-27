@@ -8,7 +8,8 @@ from dataclasses import dataclass
 from continual_agent.cognition.affect import AffectiveState
 from continual_agent.cognition.readout import Decision
 
-
+# Debug Snapshot is currently not really used. Keep as simple as possible - could probably
+# just directly print properties. Is deepcopy necessary?
 @dataclass(frozen=True)
 class DebugSnapshot:
     decision: Decision

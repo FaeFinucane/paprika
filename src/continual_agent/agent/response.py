@@ -13,7 +13,7 @@ from continual_agent.language.spiking_decoder import GeneratedResponse
 from continual_agent.simulation.population_layout import Population
 
 if TYPE_CHECKING:
-    from continual_agent.agent.config import AgentConfig
+    from continual_agent.agent.network_config import NetworkConfig
     from continual_agent.agent.spiking_runtime import SpikingRuntime
     from continual_agent.cognition.affect import AffectiveState
     from continual_agent.cognition.affect_circuit import AffectiveCircuit
@@ -26,7 +26,7 @@ class _ResponseHost(Protocol):
     affect: AffectiveState
     working_memory: WorkingMemory
     encoder: TextEncoder
-    config: AgentConfig
+    config: NetworkConfig
     actions: tuple[Action, ...]
     affect_circuit: AffectiveCircuit
     last_snapshot: DebugSnapshot | None

@@ -11,6 +11,7 @@ from continual_agent.simulation.population_layout import Population, PopulationL
 
 @dataclass(frozen=True)
 class HomeostasisConfig:
+    # Enabled should not be part of config. If homeostasis is disabled, HomeoStasisConfig should be None, and PopulationHomeostasis should not be created.
     enabled: bool = False
     target_rate: float = 0.1
     strength: float = 0.01
@@ -52,6 +53,7 @@ class PopulationHomeostasis:
     def observe(self, spikes: np.ndarray) -> None:
         if not self.config.enabled:
             return
+        # Why not just use the tick passed in by NetworkPlugin, and do if tick modulo update_interval == 0 and tick > 0?
         self._ticks += 1
         self._spikes += np.asarray(spikes, dtype=float)
         if self._ticks < self.config.update_interval:

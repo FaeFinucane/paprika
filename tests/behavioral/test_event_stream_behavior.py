@@ -1,6 +1,6 @@
 """End-to-end contracts for the named output event stream."""
 
-from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
+from continual_agent.agent.conversation_agent import ConversationAgent, NetworkConfig
 from continual_agent.cognition.readout import OutputEvent
 from continual_agent.evaluation.event_stream import (
     EventOutcome,
@@ -34,7 +34,7 @@ def test_named_sequence_accepts_late_events_in_order_and_reports_latency() -> No
 
 
 def test_agent_consumes_stream_report_as_one_ordered_reward_ledger() -> None:
-    agent = ConversationAgent(AgentConfig(seed=31))
+    agent = ConversationAgent(NetworkConfig(seed=31))
     report = evaluate_event_stream(("x", "<EOS>"), (output("x", 0), output("<EOS>", 1)))
 
     prediction_error = agent.apply_event_stream_reward(report)

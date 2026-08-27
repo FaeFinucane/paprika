@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from continual_agent.agent.conversation_agent import AgentConfig, ConversationAgent
+from continual_agent.agent.conversation_agent import ConversationAgent, NetworkConfig
 from continual_agent.agent.session import InputSignal
 from continual_agent.cognition.readout import Action
 from continual_agent.language.spiking_decoder import SpikingCharacterDecoder
@@ -42,7 +42,7 @@ def test_response_event_training_restores_idle_lifecycle() -> None:
 
 
 def test_supervised_teacher_updates_existing_hidden_output_edges() -> None:
-    agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
+    agent = ConversationAgent(NetworkConfig(input_features=16, seed=4))
     edges = agent.runtime.hidden_output_edge_indices
     target = agent.runtime.layout.subgroup(Population.OUTPUT_CHAR, "a")
     selected = edges[
@@ -59,7 +59,7 @@ def test_supervised_teacher_updates_existing_hidden_output_edges() -> None:
 
 
 def test_repeated_event_does_not_reinject_input() -> None:
-    agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
+    agent = ConversationAgent(NetworkConfig(input_features=16, seed=4))
     currents: list[np.ndarray] = []
     original_step = agent.runtime.network.step
 
@@ -76,7 +76,7 @@ def test_repeated_event_does_not_reinject_input() -> None:
 
 
 def test_response_teacher_respects_ablation() -> None:
-    agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
+    agent = ConversationAgent(NetworkConfig(input_features=16, seed=4))
     edges = agent.runtime.hidden_output_edge_indices.copy()
     agent.runtime.ablate_edges(edges)
 
@@ -96,7 +96,7 @@ def test_spiking_response_has_bounded_output_and_eos_control() -> None:
 
 def test_recurrent_state_spans_output_events_without_external_token_input() -> None:
     agent = ConversationAgent(
-        AgentConfig(input_features=16, seed=4, persistent_working_memory=False)
+        NetworkConfig(input_features=16, seed=4, persistent_working_memory=False)
     )
     original_step = agent.runtime.network.step
     currents: list[np.ndarray] = []
@@ -127,14 +127,14 @@ def test_recurrent_state_spans_output_events_without_external_token_input() -> N
 
 
 def test_recurrent_state_boundary_follows_session_policy() -> None:
-    persistent = ConversationAgent(AgentConfig(input_features=16, seed=4))
+    persistent = ConversationAgent(NetworkConfig(input_features=16, seed=4))
     persistent.generate_response(Action.ANSWER, max_tokens=1)
     first_ticks = persistent.runtime.network.tick
     persistent.generate_response(Action.ANSWER, max_tokens=1)
     assert persistent.runtime.network.tick > first_ticks
 
     reset = ConversationAgent(
-        AgentConfig(input_features=16, seed=4, persistent_working_memory=False)
+        NetworkConfig(input_features=16, seed=4, persistent_working_memory=False)
     )
     reset.generate_response(Action.ANSWER, max_tokens=1)
     first_ticks = reset.runtime.network.tick

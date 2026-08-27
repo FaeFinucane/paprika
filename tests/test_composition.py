@@ -43,6 +43,7 @@ def test_runtime_composes_owned_config_session_and_runner_components() -> None:
         )
     )
 
+    # These assertions are worthless. They don't test anything useful.
     assert isinstance(runtime.session, RuntimeSession)
     assert isinstance(runtime.trainer, InputRunner)
     assert not hasattr(runtime, "neurons")
@@ -58,7 +59,7 @@ def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     assert not hasattr(runtime, "_diagnostic_ticks")
     assert runtime.metrics.ticks == 0
 
-
+# Not really worth it as a test. It's good the validation logic is there, but this isn't a publicly used project where we need to be concerned with garbage in.
 def test_network_config_rejects_nonfinite_and_invalid_values() -> None:
     import pytest
 

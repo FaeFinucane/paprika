@@ -6,6 +6,10 @@ from typing import Protocol
 
 import numpy as np
 
+# Entire drive protocol is too abstract and difficult to follow.
+# Especially with ArrayDrive being the way the actual current is modified?!
+# Remove as abstraction and just ensure background current and homeostasis are well encapsulated but
+# called directly in SpikingRuntime
 
 class Drive(Protocol):
     """Add this tick's current to ``output`` without allocating it."""

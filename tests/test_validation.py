@@ -5,7 +5,7 @@ from continual_agent.cognition.readout import Action
 from continual_agent.environment.scenarios import ConversationScenario
 from continual_agent.evaluation.event_stream import EventStreamConfig, TargetEvent
 
-
+# Not that useful as a test
 def test_affect_rejects_non_finite_values() -> None:
     with pytest.raises(ValueError):
         AffectiveState(valence=float("nan"))

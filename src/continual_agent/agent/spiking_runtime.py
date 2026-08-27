@@ -40,6 +40,7 @@ class SpikingRuntime:
     response_session: ResponseSession
     metrics: RuntimeMetrics
     metrics_plugin: MetricsPlugin
+    # Very confused - drives are present twice in these properties? Why
     homeostasis: PopulationHomeostasis
     external_drive: ArrayDrive
     background_drive: BackgroundDrive
@@ -58,6 +59,8 @@ class SpikingRuntime:
     trainer: InputRunner
 
     def __init__(self, config: NetworkConfig) -> None:
+        # This seems ridiculously confusing. NetworkBundle magically being written to properties here?
+        # Why not just have NetworkConfig.build() -> SpikingRuntime?
         bundle = config.build()
         self.layout = bundle.layout
         self.network = bundle.network

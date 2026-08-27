@@ -10,7 +10,7 @@ from continual_agent.agent.session import InputSignal
 from continual_agent.simulation.population_layout import Population
 
 if TYPE_CHECKING:
-    from continual_agent.agent.config import AgentConfig
+    from continual_agent.agent.network_config import NetworkConfig
     from continual_agent.agent.spiking_runtime import SpikingRuntime
     from continual_agent.cognition.readout import Action, OutputEvent
     from continual_agent.encoding.text_encoder import TextEncoder
@@ -25,7 +25,7 @@ if TYPE_CHECKING:
 
 class _EventTrainingHost(Protocol):
     encoder: TextEncoder
-    config: AgentConfig
+    config: NetworkConfig
     runtime: SpikingRuntime
     language: SpikingCharacterDecoder
 

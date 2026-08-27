@@ -20,6 +20,7 @@ class PopulationProjectionSeed:
     mean: float
     spread: float = 0.0
     contacts: int = 1
+    # Allow self edges should always be false. Remove config and inline logic.
     allow_self_edges: bool = False
 
     def __post_init__(self) -> None:
@@ -45,6 +46,7 @@ class PopulationProjectionSeed:
 class WeightInitializationConfig:
     """Distribution and bootstrap policy used while constructing a network."""
 
+    # Properties could be per-population objects to avoid so much repitition.
     excitatory_weight: float = 0.18
     inhibitory_weight: float = -0.12
     inhibitory_fraction: float = 0.15

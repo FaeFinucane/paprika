@@ -11,7 +11,7 @@ local updates plus delayed reward.
 
 `TextEncoder.feature_vector()` creates bounded semantic features and
 `TextEncoder.present()` emits rate-coded frames with dedicated neural
-`INPUT_BEGIN` and `INPUT_END` currents. `AgentConfig.presentation_speed` holds each frame for a chosen
+`INPUT_BEGIN` and `INPUT_END` currents. `NetworkConfig.presentation_speed` holds each frame for a chosen
 number of simulation ticks; values above one are an early-teaching slowdown.
 
 Implemented in `src/continual_agent/encoding/text_encoder.py` and orchestrated
@@ -144,8 +144,7 @@ above 0.5 by default. Voltage and threshold summaries are distributions, while
 weight and eligibility norms are available by output pathway.
 
 Population homeostasis is opt-in through a `HomeostasisConfig` supplied as
-`NetworkConfig.homeostasis`; the conversational adapter passes
-`AgentConfig.homeostasis` through to that network configuration. The config
+`NetworkConfig.homeostasis`. The config
 owns the target, strength, interval, current bound, and population settings.
 It adds a bounded shared current after each slow window. The default is
 disabled; no individual firing-rate targets, adaptive thresholds, output

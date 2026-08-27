@@ -25,6 +25,7 @@ class NetworkPlugin(Protocol):
     def after_step(self, context: NetworkContext) -> None: ...
 
 
+# RuntimeMetrics can be a metrics plugin, no adapter necessary
 class MetricsPlugin:
     interval = 1
 
@@ -34,7 +35,7 @@ class MetricsPlugin:
     def after_step(self, context: NetworkContext) -> None:
         self.metrics.record(context.spikes, context.voltage)
 
-
+# Homeostasis can be a metrics plugin, no adapter necessary
 class HomeostasisPlugin:
     def __init__(self, homeostasis: PopulationHomeostasis) -> None:
         self.homeostasis = homeostasis
@@ -43,7 +44,7 @@ class HomeostasisPlugin:
     def after_step(self, context: NetworkContext) -> None:
         self.homeostasis.observe(context.spikes)
 
-
+# Plasticity can be a metrics plugin, no adapter necessary
 class PlasticityPlugin:
     def __init__(self, plasticity: RewardModulatedSTDP) -> None:
         self.plasticity = plasticity

@@ -22,7 +22,7 @@ The default configuration has 188 neurons:
 | `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed by `src/continual_agent/agent/network_config.py` |
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
-`AgentConfig` controls these dimensions. `NetworkConfig` owns construction fields and layout,
+`NetworkConfig` controls these dimensions and owns construction fields and layout,
 neuron, synapse, drive, plugin, and readout construction; the dedicated
 `WeightInitializer` owns validated weight distributions, population projection
 seeds, bootstrap contacts, and stable named RNG streams. It
@@ -111,9 +111,8 @@ network is not reset between character events in a response.
   a per-neuron rate at or above the configured saturation rate (0.5 by default).
   `population_homeostasis.py` optionally applies a slow, bounded shared current
   from population mean-rate error; it never drives neurons toward identical rates.
-- `src/continual_agent/agent/config.py`, `response.py`, and `event_training.py`
-  keep configuration, response lifecycle, and event training separate from the
-  public facade.
+- `NetworkConfig`, `response.py`, and `event_training.py` keep configuration,
+  response lifecycle, and event training separate from the public facade.
 
 ## Limitations
 

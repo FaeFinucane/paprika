@@ -21,6 +21,7 @@ class Action(str, Enum):
     WAIT = "wait"
 
 
+# Action is just a special kind of OutputEvent isn't it? Couldn't we re-use the OutputEvent class for this?
 @dataclass(frozen=True)
 class Decision:
     action: Action
@@ -29,7 +30,8 @@ class Decision:
     evidence: dict[Action, float]
     timed_out: bool
 
-
+# If we make one EventReadout per-population, then we don't need to store population on OutputEvent, we'll know which one it is
+# based on which event readout we're reading from.
 @dataclass(frozen=True)
 class OutputEvent:
     """One discrete event from a named output subgroup."""
@@ -48,7 +50,7 @@ class OutputEvent:
     def label(self) -> str:
         return self.name
 
-
+# OutputCandidate seems like internal-only logic that doesn't need to be a whole extra class.
 @dataclass(frozen=True)
 class OutputCandidate:
     """Evidence for one output subgroup in a single observation."""
@@ -62,7 +64,7 @@ class OutputCandidate:
     def is_eos(self) -> bool:
         return self.population is Population.OUTPUT_CHAR and self.name == "<EOS>"
 
-
+# ArbitrationDecision is also internal-only
 @dataclass(frozen=True)
 class ArbitrationDecision:
     """Inspectable result of one independent output arbitration step."""
@@ -72,6 +74,7 @@ class ArbitrationDecision:
     reason: str
 
 
+# OutputArbitrationPolicy is kinda useful for testability, but still really doesn't need to be its own class
 class OutputArbitrationPolicy:
     """Deterministically select at most one candidate event.
 
@@ -117,7 +120,7 @@ class OutputArbitrationPolicy:
         selected = max(candidates, key=rank)
         return ArbitrationDecision(selected, candidates, "selected")
 
-
+# EventReadout could almost be a plugin couldn't it? All it needs to do is observe spikes on every tick.
 class EventReadout:
     """Convert output-population evidence into timestamped discrete events."""
 
@@ -129,6 +132,7 @@ class EventReadout:
     ) -> None:
         self.layout = layout
         self.arbitration = arbitration or OutputArbitrationPolicy()
+        # EventReadout could focus just on a single population. To have two outputs, we make two EventReadout objects and pass in the population to observe.
         self._groups: dict[Population, dict[str, np.ndarray]] = {
             Population.OUTPUT_ACTION: self._named_groups(layout.action_subgroups),
             Population.OUTPUT_CHAR: self._named_groups(layout.char_subgroups),
@@ -142,9 +146,12 @@ class EventReadout:
         return {name: np.arange(bounds.start, bounds.stop) for name, bounds in groups.items()}
 
     def reset(self) -> None:
+        # Timestamp is a weird and probably unnecessary value. Looks like it is just going to equal the self.events index?
         self.timestamp = -1
+        # I think readout doesn't need to care about EOS logic - that could be built on-top of the EventReadout.
         self.stopped = False
         self.events: list[OutputEvent] = []
+        # Doesn't seem like something we need to store.
         self.last_arbitration: ArbitrationDecision | None = None
         self.active_output: tuple[Population, str] | None = None
         self._last_event_timestamp: int | None = None
@@ -162,6 +169,7 @@ class EventReadout:
         the number of spiking neurons in each named subgroup.
         """
         values = np.asarray(frame, dtype=float)
+        # Surely at this point we can trust values to be the expected dimensions? This is paranoid.
         if values.ndim != 1 or values.size < self.layout.total_count:
             raise ValueError("output frame must cover the named network layout")
         if timestamp is None:

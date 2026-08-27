@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 import numpy as np
 
-from continual_agent.agent.config import AgentConfig
 from continual_agent.agent.debug import DebugSnapshot
 from continual_agent.agent.event_training import EventTrainingMixin
 from continual_agent.agent.network_config import NetworkConfig
@@ -36,34 +36,28 @@ T = TypeVar("T")
 class ConversationAgent(ResponseMixin, EventTrainingMixin):
     """Continuously plastic text agent with a small typed action space."""
 
-    def __init__(self, config: AgentConfig | None = None) -> None:
-        self.config = config or AgentConfig()
+    def __init__(self, config: NetworkConfig | None = None) -> None:
+        self.config = config or NetworkConfig()
         self.actions = tuple(Action)
         self.language = SpikingCharacterDecoder(
             alphabet=self.config.language_alphabet,
             neurons_per_token=self.config.neurons_per_token,
         )
-        self.runtime = SpikingRuntime(
-            NetworkConfig(
-                input_features=self.config.input_features,
-                hidden_neurons=self.config.hidden_neurons,
-                output_tokens=self.language.tokens,
-                neurons_per_token=self.config.neurons_per_token,
-                action_names=tuple(action.value for action in self.actions),
-                neurons_per_action=self.config.neurons_per_action,
-                affect_names=AffectiveCircuit.signal_names,
-                neurons_per_affect=self.config.neurons_per_affect,
-                connection_probability=self.config.connection_probability,
-                seed=self.config.seed,
-                session_policy=SessionPolicy(
-                    reset_membrane=not self.config.persistent_working_memory,
-                    reset_refractory=not self.config.persistent_working_memory,
-                    reset_pending_current=not self.config.persistent_working_memory,
-                    reset_recurrent_activity=not self.config.persistent_working_memory,
-                    reset_working_memory=not self.config.persistent_working_memory,
-                ),
-                homeostasis=self.config.homeostasis,
+        self.config = replace(
+            self.config,
+            action_names=tuple(action.value for action in self.actions),
+            affect_names=AffectiveCircuit.signal_names,
+            output_tokens=self.language.tokens,
+            session_policy=SessionPolicy(
+                reset_membrane=not self.config.persistent_working_memory,
+                reset_refractory=not self.config.persistent_working_memory,
+                reset_pending_current=not self.config.persistent_working_memory,
+                reset_recurrent_activity=not self.config.persistent_working_memory,
+                reset_working_memory=not self.config.persistent_working_memory,
             ),
+        )
+        self.runtime = SpikingRuntime(
+            self.config,
         )
         self.encoder = TextEncoder(
             self.config.input_features,
