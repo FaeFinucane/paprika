@@ -3,7 +3,6 @@ from unittest.mock import Mock, patch
 import numpy as np
 import pytest
 
-from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.agent.session import InputSignal
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.experiments.synthetic_temporal import (
@@ -20,7 +19,6 @@ from continual_agent.experiments.synthetic_temporal import (
 from continual_agent.plasticity.stdp import RewardModulatedSTDP
 from continual_agent.simulation.population_layout import Population
 from continual_agent.simulation.synapses import SparseSynapses
-from tests.helpers import network_config
 
 
 def small_config() -> TemporalExperimentConfig:
@@ -194,17 +192,6 @@ def test_held_out_sequences_are_evaluated_against_unshuffled_targets() -> None:
     )
     trial = result.trials[0]
     assert trial.target == ("B", "A", "<EOS>")
-
-
-def test_production_runtime_exposes_the_pathways_used_by_controls() -> None:
-    agent = ConversationAgent(
-        network_config(input_features=4, language_alphabet=("A", "B"), seed=1)
-    )
-    assert isinstance(agent.runtime, SpikingRuntime)
-    assert agent.runtime.token_input_edge_indices.size > 0
-    assert agent.runtime.hidden_recurrent_edge_indices.size > 0
-    assert agent.runtime.hidden_output_edge_indices.size > 0
-    assert agent.runtime.direct_input_output_edge_indices.size > 0
 
 
 def test_paired_agents_have_distinct_training_modes() -> None:

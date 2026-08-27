@@ -11,6 +11,7 @@ import numpy as np
 # Remove as abstraction and just ensure background current and homeostasis are well encapsulated but
 # called directly in SpikingRuntime
 
+
 class Drive(Protocol):
     """Add this tick's current to ``output`` without allocating it."""
 

@@ -35,6 +35,7 @@ class MetricsPlugin:
     def after_step(self, context: NetworkContext) -> None:
         self.metrics.record(context.spikes, context.voltage)
 
+
 # Homeostasis can be a metrics plugin, no adapter necessary
 class HomeostasisPlugin:
     def __init__(self, homeostasis: PopulationHomeostasis) -> None:
@@ -43,6 +44,7 @@ class HomeostasisPlugin:
 
     def after_step(self, context: NetworkContext) -> None:
         self.homeostasis.observe(context.spikes)
+
 
 # Plasticity can be a metrics plugin, no adapter necessary
 class PlasticityPlugin:

@@ -1,7 +1,5 @@
-import numpy as np
 import pytest
 
-from continual_agent.agent.conversation_agent import ConversationAgent
 from continual_agent.cognition.readout import OutputEvent
 from continual_agent.evaluation.event_stream import (
     EventOutcome,
@@ -13,7 +11,6 @@ from continual_agent.evaluation.event_stream import (
     evaluate_event_stream,
 )
 from continual_agent.simulation.population_layout import Population
-from tests.helpers import network_config
 
 
 def test_early_reward_schedule_is_asymmetric_and_event_level() -> None:
@@ -95,59 +92,6 @@ def test_early_timing_is_open_by_default_but_can_be_configured() -> None:
 
     assert tolerant.counts[EventOutcome.CORRECT_EVENT] == 1
     assert strict.counts[EventOutcome.INCORRECT_EVENT] == 1
-
-
-def test_configured_event_rewards_are_consumed_by_plasticity_and_ledger() -> None:
-    agent = ConversationAgent(network_config(seed=12))
-    agent.runtime.plasticity.eligibility.fill(1.0)
-    config = EventStreamConfig(
-        correct_reward=2.0,
-        incorrect_reward=-2.0,
-        missing_reward=-3.0,
-        unwanted_reward=-4.0,
-        premature_eos_reward=-5.0,
-        missing_eos_reward=-6.0,
-    )
-    report = evaluate_event_stream(
-        ("m", "<EOS>"),
-        (event("b", 0), event("<EOS>", 1)),
-        config=config,
-    )
-    before = agent.runtime.network.synapses.weight.copy()
-
-    prediction_error = agent.apply_event_stream_reward(report)
-
-    assert prediction_error == report.total_reward
-    assert agent.reward_ledger == report.records
-    assert not np.array_equal(agent.runtime.network.synapses.weight, before)
-
-
-def test_event_reward_outcomes_remain_distinct_in_the_consumed_ledger() -> None:
-    agent = ConversationAgent(network_config(seed=13))
-    config = EventStreamConfig(patience_window=1)
-    reports = (
-        evaluate_event_stream(("m",), (event("m", 0),), config=config),
-        evaluate_event_stream(("m",), (event("b", 0),), config=config),
-        evaluate_event_stream(("m",), (), config=config, end_time=2),
-        evaluate_event_stream(
-            ("m",), (event("b", 0),), silence_intervals=(SilenceInterval(0, 0),), config=config
-        ),
-        evaluate_event_stream(("m", "<EOS>"), (event("<EOS>", 0),), config=config),
-        evaluate_event_stream(("m", "<EOS>"), (event("m", 0),), config=config, end_time=8),
-    )
-
-    for report in reports:
-        agent.apply_event_stream_reward(report)
-
-    ledger_outcomes = {record.outcome for record in agent.reward_ledger}
-    assert {
-        EventOutcome.CORRECT_EVENT,
-        EventOutcome.INCORRECT_EVENT,
-        EventOutcome.MISSING_OUTPUT,
-        EventOutcome.UNWANTED_OUTPUT,
-        EventOutcome.PREMATURE_EOS,
-        EventOutcome.MISSING_EOS,
-    } <= ledger_outcomes
 
 
 def test_event_stream_rejects_non_increasing_timestamps() -> None:

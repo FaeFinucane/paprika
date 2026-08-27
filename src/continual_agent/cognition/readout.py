@@ -3,32 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Iterable, Mapping
 
 import numpy as np
 
 from continual_agent.simulation.population_layout import Population, PopulationLayout
-
-
-class Action(str, Enum):
-    ANSWER = "answer"
-    CLARIFY = "clarify"
-    ACKNOWLEDGE = "acknowledge"
-    UNCERTAIN = "uncertain"
-    REVISE = "revise"
-    REFUSE = "refuse"
-    WAIT = "wait"
-
-
-# Action is just a special kind of OutputEvent isn't it? Couldn't we re-use the OutputEvent class for this?
-@dataclass(frozen=True)
-class Decision:
-    action: Action
-    confidence: float
-    ticks: int
-    evidence: dict[Action, float]
-    timed_out: bool
 
 
 # If we make one EventReadout per-population, then we don't need to store population on OutputEvent, we'll know which one it is
@@ -219,29 +198,3 @@ class EventReadout:
         if event.is_eos:
             self.stopped = True
         return event
-
-
-class ActionReadout:
-    """Expose named action population bounds for neural training/debugging."""
-
-    def __init__(
-        self,
-        layout: PopulationLayout,
-    ):
-        self.layout = layout
-        self.actions = tuple(
-            Action(name) for name in layout.subgroup_names(Population.OUTPUT_ACTION)
-        )
-
-    def groups(self, layout: PopulationLayout) -> dict[Action, np.ndarray]:
-        """Return the layout's named action subgroups."""
-        try:
-            return {
-                action: np.arange(
-                    layout.subgroup(Population.OUTPUT_ACTION, action.value).start,
-                    layout.subgroup(Population.OUTPUT_ACTION, action.value).stop,
-                )
-                for action in self.actions
-            }
-        except KeyError as error:
-            raise ValueError("layout must define every action subgroup") from error

@@ -1,8 +1,8 @@
 # Continual Spiking Agent
 
-The first vertical slice is a small, inspectable text-action learner. It uses
+This is a small, inspectable synthetic temporal-copy experiment built from
 leaky integrate-and-fire neurons, sparse recurrent synapses, reward-modulated
-STDP, named event readouts, and bounded affective state.
+STDP, named event readouts, and explicit session boundaries.
 
 ## Setup
 
@@ -21,18 +21,15 @@ python3 -m venv .venv
 .venv/bin/python -m continual_agent.experiments.synthetic_temporal
 ```
 
-It is deliberately not a free-form chatbot yet. Character responses use the
-spiking output populations and timestamped event-readout path.
+The experiment is deliberately non-linguistic: numeric frames are copied
+through the spiking output populations and scored as timestamped events.
 
 ## Documentation
 
 - [Architecture](docs/ARCHITECTURE.md) — network structure, populations, and
   implementation locations.
-- [Training](docs/TRAINING.md) — the separate training components and their
-  implementations.
+- [Training](docs/TRAINING.md) — raw-frame training and experiment controls.
 - [Tasks](docs/TASKS.md) — deferred and actionable work.
-- [Affective state reference](docs/AFFECTIVE_STATE_SPEC.md) — bounded affective
-  state and its current guarantees.
 - [Synthetic temporal experiments](docs/experiments/SYNTHETIC_TEMPORAL.md) — small
   immediate/delayed copy and pathway-control harness.
 

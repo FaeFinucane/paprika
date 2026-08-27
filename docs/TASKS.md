@@ -38,10 +38,8 @@ tasks.
   protocol has stable coverage. It must represent self-generated sensory
   reafference, not silently become a second decision-maker or external input.
 - Add an `OUTPUT_GATE` only as post-selection emission control; it must not
-  choose an action or character.
+  alter event selection.
 
-Task adapters own encoding, session boundaries, readout, and reward semantics.
-They compose the shared runtime and must not construct or step a second network.
 New external stimulation should implement the `Drive` protocol; diagnostics,
 homeostasis, and learning observations should implement a scheduled
 `NetworkPlugin`.

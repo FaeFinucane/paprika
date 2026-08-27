@@ -1,8 +1,6 @@
 import numpy as np
 
 from continual_agent.cognition.readout import (
-    Action,
-    ActionReadout,
     EventReadout,
     OutputArbitrationPolicy,
     OutputCandidate,
@@ -53,17 +51,6 @@ def make_layout() -> PopulationLayout:
 
 def frame() -> np.ndarray:
     return np.zeros(make_layout().total_count)
-
-
-def test_action_readout_only_exposes_named_layout_groups() -> None:
-    current = make_layout()
-    readout = ActionReadout(current)
-    groups = readout.groups(current)
-
-    assert groups[Action.ANSWER].tolist() == list(
-        range(*current.subgroup(Population.OUTPUT_ACTION, "answer").indices(current.total_count))
-    )
-    assert not hasattr(readout, "policy_weights")
 
 
 def test_repeated_character_requires_silent_tick() -> None:
