@@ -93,6 +93,30 @@ def test_runtime_composes_owned_config_session_and_runner_components() -> None:
     assert runtime.metrics.ticks == 0
 
 
+def test_network_config_rejects_nonfinite_and_invalid_values() -> None:
+    import pytest
+
+    with pytest.raises(ValueError):
+        NetworkConfig(4, 3, ("<EOS>",), 1, connection_probability=np.nan)
+    with pytest.raises(ValueError):
+        NetworkConfig(4, 0, ("<EOS>",), 1)
+
+
+def test_isolated_clone_preserves_custom_plugins() -> None:
+    runtime = SpikingRuntime(NetworkConfig(4, 3, ("<EOS>",), 1))
+
+    class Plugin:
+        interval = 1
+
+        def after_step(self, context: NetworkContext) -> None:
+            pass
+
+    plugin = Plugin()
+    runtime.plugins.append(plugin)
+    clone = runtime.session.clone()
+    assert any(type(item) is Plugin for item in clone.plugins)
+
+
 def test_character_output_is_terminal_and_hidden_recurrence_is_exposed() -> None:
     runtime = SpikingRuntime(
         NetworkConfig(

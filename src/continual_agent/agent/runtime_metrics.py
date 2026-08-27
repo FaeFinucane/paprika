@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from time import perf_counter
 
 import numpy as np
 
@@ -67,6 +68,7 @@ class RuntimeMetrics:
 
     def reset(self) -> None:
         self.ticks = 0
+        self.elapsed_seconds = 0.0
         self.output_events = 0
         self.spikes = np.zeros(self.layout.total_count)
         self.voltage_sum = np.zeros(self.layout.total_count)
@@ -75,6 +77,7 @@ class RuntimeMetrics:
         self.voltage_maximum = np.full(self.layout.total_count, -np.inf)
 
     def record(self, spikes: np.ndarray, voltage: np.ndarray) -> None:
+        started = perf_counter()
         spikes = np.asarray(spikes, dtype=float)
         voltage = np.asarray(voltage, dtype=float)
         if spikes.shape != (self.layout.total_count,) or voltage.shape != spikes.shape:
@@ -85,6 +88,11 @@ class RuntimeMetrics:
         self.voltage_square_sum += voltage * voltage
         self.voltage_minimum = np.minimum(self.voltage_minimum, voltage)
         self.voltage_maximum = np.maximum(self.voltage_maximum, voltage)
+        self.elapsed_seconds += perf_counter() - started
+
+    @property
+    def ticks_per_second(self) -> float:
+        return float(self.ticks / self.elapsed_seconds) if self.elapsed_seconds else 0.0
 
     def record_output_event(self) -> None:
         self.output_events += 1
@@ -97,7 +105,7 @@ class RuntimeMetrics:
         self, population: Population, threshold: float | np.ndarray
     ) -> PopulationDiagnostics:
         bounds = self.layout.slice(population)
-        indices = np.arange(bounds.start, bounds.stop)
+        indices = slice(bounds.start, bounds.stop)
         ticks = max(self.ticks, 1)
         rates = self.spikes[indices] / ticks
         voltage_mean = self.voltage_sum[indices] / ticks

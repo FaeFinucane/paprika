@@ -208,6 +208,20 @@ def test_missing_response_eos_aborts_the_agent_session() -> None:
     assert agent.last_execution_snapshot is not None
 
 
+def test_response_exception_cleans_up_session() -> None:
+    agent = ConversationAgent(AgentConfig(seed=4))
+    original = agent.runtime.step
+
+    def fail(current: np.ndarray) -> np.ndarray:
+        raise RuntimeError("boom")
+
+    agent.runtime.step = fail
+    with pytest.raises(RuntimeError):
+        agent.respond("hello")
+    assert agent.runtime.response_session.state.value == "idle"
+    agent.runtime.step = original
+
+
 def test_agent_input_presentation_closes_before_response() -> None:
     agent = ConversationAgent(AgentConfig(seed=5, max_thinking_ticks=1))
 

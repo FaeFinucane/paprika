@@ -69,6 +69,16 @@ The resulting `EventStreamReport` retains per-event rewards and metrics.
 
 Implemented in `src/continual_agent/evaluation/event_stream.py`.
 
+The synthetic temporal experiment deliberately keeps event accuracy separate
+from reward. Its early exploration schedule gives small positive values to some
+incorrect or unwanted events so that a quiet, untrained network can discover
+the output protocol before stronger penalties are introduced. This is an
+experimental bootstrapping choice, not a claim that incorrect output is good.
+It may be removed if it fails to improve discovery, retention, or eventual
+event accuracy. Experiments using this schedule should report event
+precision/recall and sequence success independently of aggregate reward, and
+compare neutral or negative incorrect-event schedules when results matter.
+
 ### 6. Reward commitment
 
 `train_response_stream()` generates a response, evaluates its event stream, and
@@ -79,6 +89,28 @@ resets traces after commitment.
 
 Implemented in `src/continual_agent/agent/conversation_agent.py` and
 `src/continual_agent/plasticity/stdp.py`.
+
+The intended near-term synthetic-training comparison is event-based reward
+commitment: commit reward when an observed event occurs, rather than also
+reapplying a delayed aggregate reward at the end of the trial. Event-based
+commitment keeps the delay between output and reinforcement short. A final
+trial settlement may remain useful for missing or deferred outcomes, but it
+must not silently duplicate an event reward. The event-versus-trial choice is
+an experiment setting and should be reported with results.
+
+The reward baseline is a running estimate of expected reward. A
+baseline-normalized advantage (also called an RPE here) is simply:
+
+```text
+advantage = observed_reward - expected_reward
+```
+
+Positive advantage strengthens eligible synapses and negative advantage weakens
+them; subtracting the baseline reduces updates caused by unsurprising rewards.
+This is distinct from restricting which synapses are eligible. The current
+prototype intentionally applies diffuse reinforcement while hidden population
+roles are still unknown. Pathway or activity-derived assembly masks should be
+comparison conditions, not assumptions about specific hidden neurons.
 
 ### 7. Affective modulation and alignment
 
@@ -126,6 +158,20 @@ configured `SessionPolicy`, even when the iterator or validation fails. The cano
 is an ordered event stream ending in EOS and remains a recurrent-state baseline,
 not a general sequence-memory claim. The automated curriculum entry point is
 `src/continual_agent/experiments/run_conversation.py`.
+
+Synthetic delayed training should replay the complete temporal input stream,
+including unlabeled delay frames. Those frames are presented as ordinary
+network time; the learner is not given a target event instructing it to emit
+silence. Output observation remains open during the configured response
+period, so the network may emit events at its own pace.
+
+For experiments, active membrane, refractory, pending-current, recurrent,
+affective, working-memory, eligibility, and background-drive RNG state should
+be independently configurable for preservation or reset. Active state is part
+of the intended continual-agent intelligence, so cold-start evaluation is a
+comparison condition rather than the universal definition of correctness.
+Snapshots should include all state needed to reproduce a run, including drive
+RNG state.
 
 ## Runtime ownership
 

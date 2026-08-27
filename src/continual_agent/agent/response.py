@@ -54,61 +54,68 @@ class ResponseMixin:
     def respond(self: Any, text: str) -> Decision:
         """Process a message and deliberate until a decision or timeout."""
         self._start_response_session()
-        self.affect.advance()
-        spikes: list[np.ndarray] = []
-        presentation = self.encoder.present(text)
-        feature_activity = self.encoder.feature_vector(text)
-        if self.runtime.response_session.policy.persist_working_memory:
-            self.working_memory.update(feature_activity)
-        for event in presentation:
-            if event.signal is not None:
-                self.runtime.step_input_signal(event.signal)
-                if event.signal is InputSignal.INPUT_END:
-                    self.runtime.response_session.begin_response()
-                continue
-            assert event.frame is not None
-            self.runtime.response_session.accept_input_frame()
-            spikes.append(self.runtime.step(self._frame_current(event.frame)))
+        try:
+            self.affect.advance()
+            spikes: list[np.ndarray] = []
+            presentation = self.encoder.present(text)
+            feature_activity = self.encoder.feature_vector(text)
+            if self.runtime.response_session.policy.persist_working_memory:
+                self.working_memory.update(feature_activity)
+            for event in presentation:
+                if event.signal is not None:
+                    self.runtime.step_input_signal(event.signal)
+                    if event.signal is InputSignal.INPUT_END:
+                        self.runtime.response_session.begin_response()
+                    continue
+                assert event.frame is not None
+                self.runtime.response_session.accept_input_frame()
+                spikes.append(self.runtime.step(self._frame_current(event.frame)))
 
-        if self.runtime.response_session.state.value != "responding":
-            self.runtime.response_session.begin_response()
-        blank = np.zeros(self.config.input_features)
-        action_event = None
-        for _ in range(self.config.max_thinking_ticks):
-            emitted = self.runtime.step(self._frame_current(blank))
-            spikes.append(emitted)
-            action_event = self.runtime.output_readout.observe(
-                emitted,
-                populations=(Population.OUTPUT_ACTION,),
+            if self.runtime.response_session.state.value != "responding":
+                self.runtime.response_session.begin_response()
+            blank = np.zeros(self.config.input_features)
+            action_event = None
+            for _ in range(self.config.max_thinking_ticks):
+                emitted = self.runtime.step(self._frame_current(blank))
+                spikes.append(emitted)
+                action_event = self.runtime.output_readout.observe(
+                    emitted,
+                    populations=(Population.OUTPUT_ACTION,),
+                )
+                if action_event is not None:
+                    break
+            if action_event is None:
+                result = Decision(
+                    action=Action.WAIT,
+                    confidence=0.0,
+                    ticks=len(spikes),
+                    evidence={action: 0.0 for action in self.actions},
+                    timed_out=True,
+                )
+            else:
+                selected_action = Action(action_event.name)
+                result = Decision(
+                    action=selected_action,
+                    confidence=1.0,
+                    ticks=len(spikes),
+                    evidence={
+                        action: action_event.evidence if action is selected_action else 0.0
+                        for action in self.actions
+                    },
+                    timed_out=False,
+                )
+            neural_affect = self.affect_circuit.decode(spikes, self.runtime.layout)
+            self.last_snapshot = DebugSnapshot.from_decision(
+                result, self.affect, neural_affect, self.working_memory.snapshot()
             )
-            if action_event is not None:
-                break
-        if action_event is None:
-            result = Decision(
-                action=Action.WAIT,
-                confidence=0.0,
-                ticks=len(spikes),
-                evidence={action: 0.0 for action in self.actions},
-                timed_out=True,
-            )
-        else:
-            selected_action = Action(action_event.name)
-            result = Decision(
-                action=selected_action,
-                confidence=1.0,
-                ticks=len(spikes),
-                evidence={
-                    action: action_event.evidence if action is selected_action else 0.0
-                    for action in self.actions
-                },
-                timed_out=False,
-            )
-        neural_affect = self.affect_circuit.decode(spikes, self.runtime.layout)
-        self.last_snapshot = DebugSnapshot.from_decision(
-            result, self.affect, neural_affect, self.working_memory.snapshot()
-        )
-        self.runtime.response_session.abort(self._current_session_snapshot())
-        return result
+            return result
+        finally:
+            session = self.runtime.response_session
+            if session.state.value == "receiving_input":
+                session.input_active = False
+                session.state = session.state.IDLE
+            elif session.state.value == "responding":
+                session.abort(self._current_session_snapshot())
 
     def generate_response(
         self: Any, act: Action, max_tokens: int | None = None

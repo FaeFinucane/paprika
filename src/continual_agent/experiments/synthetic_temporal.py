@@ -78,6 +78,7 @@ class TemporalExperimentConfig:
     homeostasis_strength: float = 0.01
     homeostasis_update_interval: int = 100
     homeostasis_max_current: float = 0.25
+    replicates: int = 1
 
     def __post_init__(self) -> None:
         if not self.alphabet or len(set(self.alphabet)) != len(self.alphabet):
@@ -92,6 +93,8 @@ class TemporalExperimentConfig:
             or self.response_ticks <= 0
         ):
             raise ValueError("trial and timing values must be positive")
+        if self.replicates <= 0:
+            raise ValueError("replicates must be positive")
         if not 0.0 <= self.stdp_background_rate <= 1.0:
             raise ValueError("stdp_background_rate must be in [0, 1]")
         if self.stdp_background_current < 0.0:
@@ -117,6 +120,7 @@ class TemporalTrialResult:
     firing_rate: float = 0.0
     output_event_rate: float = 0.0
     population_diagnostics: dict[str, dict[str, float]] | None = None
+    replicate: int = 0
 
 
 @dataclass
@@ -344,104 +348,109 @@ def run_temporal_experiment(
         for kind in agents:
             for control in controls:
                 for trial_index, sequence in enumerate(evaluation_sequences):
-                    seed = (
-                        config.seed
-                        + trial_index
-                        + 1000 * list(CopyCondition).index(condition)
-                        + 10000 * list(Control).index(control)
-                        + 100000 * list(AgentKind).index(kind)
-                    )
-                    agent = _make_runtime(
-                        config,
-                        seed,
-                        stdp_background=kind is AgentKind.REWARD_MODULATED_STDP,
-                    )
-                    if control is Control.RECURRENT_ABLATION:
-                        agent.ablate_edges(agent.hidden_recurrent_edge_indices)
-                    if control is Control.DIRECT_INPUT_OUTPUT_ABLATION:
-                        agent.ablate_edges(agent.direct_input_output_edge_indices)
-                    events, labelled = _stream(config, sequence)
-                    target = (*sequence, "<EOS>")
-                    before = agent.network.synapses.weight.copy()
-                    mode = (
-                        TrainingMode.UNTRAINED
-                        if control is Control.UNTRAINED
-                        else TrainingMode.NO_LEARNING
-                        if control is Control.NO_LEARNING
-                        else TrainingMode.REWARD_MODULATED_STDP
-                        if kind is AgentKind.REWARD_MODULATED_STDP
-                        else TrainingMode.SUPERVISED
-                    )
-                    if control not in (Control.UNTRAINED, Control.NO_LEARNING):
-                        training_target = (
-                            _supervised_labels(config, sequence)
-                            if control is not Control.SHUFFLED_TARGET
-                            else [
-                                (frame, label)
-                                for (frame, _), label in zip(
-                                    _supervised_labels(config, sequence), reversed(target)
-                                )
-                            ]
+                    for replicate in range(config.replicates):
+                        seed = (
+                            config.seed
+                            + trial_index
+                            + 1000000 * replicate
+                            + 1000 * list(CopyCondition).index(condition)
+                            + 10000 * list(Control).index(control)
+                            + 100000 * list(AgentKind).index(kind)
                         )
-                        reward, eligibility_change, pathway_change, pathway_eligibility = _train(
-                            agent,
-                            events,
-                            training_target,
-                            kind,
-                            mode,
-                            (
-                                config.stdp_training_trials
-                                if kind is AgentKind.REWARD_MODULATED_STDP
-                                else config.training_trials
-                            ),
-                            condition,
+                        agent = _make_runtime(
                             config,
-                            tuple(label for _, label in training_target),
+                            seed,
+                            stdp_background=kind is AgentKind.REWARD_MODULATED_STDP,
                         )
-                    else:
-                        reward, eligibility_change, pathway_change, pathway_eligibility = (
-                            0.0,
-                            0.0,
-                            {},
-                            {},
+                        if control is Control.RECURRENT_ABLATION:
+                            agent.ablate_edges(agent.hidden_recurrent_edge_indices)
+                        if control is Control.DIRECT_INPUT_OUTPUT_ABLATION:
+                            agent.ablate_edges(agent.direct_input_output_edge_indices)
+                        events, labelled = _stream(config, sequence)
+                        target = (*sequence, "<EOS>")
+                        before = agent.network.synapses.weight.copy()
+                        mode = (
+                            TrainingMode.UNTRAINED
+                            if control is Control.UNTRAINED
+                            else TrainingMode.NO_LEARNING
+                            if control is Control.NO_LEARNING
+                            else TrainingMode.REWARD_MODULATED_STDP
+                            if kind is AgentKind.REWARD_MODULATED_STDP
+                            else TrainingMode.SUPERVISED
                         )
-                    agent.reset_diagnostics()
-                    observed = agent.run_input_events(
-                        events,
-                        response_ticks=config.response_ticks,
-                        observe_during_input=condition is CopyCondition.IMMEDIATE,
-                    )
-                    hidden = agent.layout.slice(Population.HIDDEN)
-                    report = evaluate_event_stream(
-                        target,
-                        observed,
-                        config=RewardSchedule.for_stage(config.reward_stage).event_config(
-                            patience_window=config.patience_window
-                        ),
-                        end_time=sum(isinstance(item, np.ndarray) for item in events)
-                        + config.response_ticks,
-                        withheld_prefix=0,
-                    )
-                    trials.append(
-                        TemporalTrialResult(
-                            condition,
-                            kind,
-                            control,
-                            mode,
+                        if control not in (Control.UNTRAINED, Control.NO_LEARNING):
+                            training_target = (
+                                _supervised_labels(config, sequence)
+                                if control is not Control.SHUFFLED_TARGET
+                                else [
+                                    (frame, label)
+                                    for (frame, _), label in zip(
+                                        _supervised_labels(config, sequence), reversed(target)
+                                    )
+                                ]
+                            )
+                            reward, eligibility_change, pathway_change, pathway_eligibility = (
+                                _train(
+                                    agent,
+                                    events,
+                                    training_target,
+                                    kind,
+                                    mode,
+                                    (
+                                        config.stdp_training_trials
+                                        if kind is AgentKind.REWARD_MODULATED_STDP
+                                        else config.training_trials
+                                    ),
+                                    condition,
+                                    config,
+                                    tuple(label for _, label in training_target),
+                                )
+                            )
+                        else:
+                            reward, eligibility_change, pathway_change, pathway_eligibility = (
+                                0.0,
+                                0.0,
+                                {},
+                                {},
+                            )
+                        agent.reset_diagnostics()
+                        observed = agent.run_input_events(
+                            events,
+                            response_ticks=config.response_ticks,
+                            observe_during_input=condition is CopyCondition.IMMEDIATE,
+                        )
+                        hidden = agent.layout.slice(Population.HIDDEN)
+                        report = evaluate_event_stream(
                             target,
                             observed,
-                            report,
-                            float(np.mean(np.abs(agent.network.neurons.voltage[hidden]))),
-                            float(np.abs(agent.network.synapses.weight - before).sum()),
-                            reward,
-                            eligibility_change,
-                            pathway_change,
-                            pathway_eligibility,
-                            agent.diagnostics["firing_rate"],
-                            agent.diagnostics["output_event_rate"],
-                            agent.population_diagnostics,
+                            config=RewardSchedule.for_stage(config.reward_stage).event_config(
+                                patience_window=config.patience_window
+                            ),
+                            end_time=sum(isinstance(item, np.ndarray) for item in events)
+                            + config.response_ticks,
+                            withheld_prefix=0,
                         )
-                    )
+                        trials.append(
+                            TemporalTrialResult(
+                                condition,
+                                kind,
+                                control,
+                                mode,
+                                target,
+                                observed,
+                                report,
+                                float(np.mean(np.abs(agent.network.neurons.voltage[hidden]))),
+                                float(np.abs(agent.network.synapses.weight - before).sum()),
+                                reward,
+                                eligibility_change,
+                                pathway_change,
+                                pathway_eligibility,
+                                agent.diagnostics["firing_rate"],
+                                agent.diagnostics["output_event_rate"],
+                                agent.population_diagnostics,
+                                replicate,
+                            )
+                        )
     return TemporalExperimentResult(trials)
 
 

@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import math
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 from continual_agent.cognition.affect import AffectiveEvent
 from continual_agent.cognition.readout import Action
@@ -14,11 +16,20 @@ class ConversationScenario:
     messages: tuple[str, ...]
     expected: Action
     affect_event: AffectiveEvent = AffectiveEvent()
-    affect_targets: dict[str, tuple[float, float]] = None  # type: ignore[assignment]
+    affect_targets: Mapping[str, tuple[float, float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.affect_targets is None:
-            object.__setattr__(self, "affect_targets", {})
+        if not self.name.strip():
+            raise ValueError("scenario name must not be empty")
+        if not self.messages or any(not message.strip() for message in self.messages):
+            raise ValueError("scenario messages must not be empty")
+        targets = dict(self.affect_targets)
+        for name, bounds in targets.items():
+            if len(bounds) != 2 or not all(math.isfinite(value) for value in bounds):
+                raise ValueError(f"invalid affect target for {name!r}")
+            if bounds[0] > bounds[1]:
+                raise ValueError(f"affect target lower bound exceeds upper bound for {name!r}")
+        object.__setattr__(self, "affect_targets", targets)
 
     def reward_for(self, action: Action) -> float:
         return 1.0 if action == self.expected else -1.0

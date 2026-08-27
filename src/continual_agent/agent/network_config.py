@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -89,6 +90,52 @@ class NetworkConfig:
     homeostasis_max_current: float = 0.25
     homeostasis_populations: tuple[Population, ...] = (Population.HIDDEN,)
 
+    def __post_init__(self) -> None:
+        integer_fields = (
+            "input_features",
+            "hidden_neurons",
+            "neurons_per_token",
+            "neurons_per_action",
+            "neurons_per_affect",
+            "homeostasis_update_interval",
+        )
+        for name in integer_fields:
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.input_features <= BOUNDARY_CHANNEL_COUNT:
+            raise ValueError("input_features must leave room for boundary channels")
+        if not self.output_tokens:
+            raise ValueError("output_tokens must not be empty")
+        numeric_fields = (
+            "connection_probability",
+            "learning_rate",
+            "background_rate",
+            "background_current",
+            "homeostasis_target_rate",
+            "homeostasis_strength",
+            "homeostasis_max_current",
+        )
+        for name in numeric_fields:
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+            ):
+                raise ValueError(f"{name} must be finite")
+        if not 0 <= self.connection_probability <= 1:
+            raise ValueError("connection_probability must be in [0, 1]")
+        if not 0 <= self.background_rate <= 1 or self.background_current < 0:
+            raise ValueError("background rate must be in [0, 1] and current must be non-negative")
+        if (
+            self.learning_rate < 0
+            or self.homeostasis_target_rate < 0
+            or self.homeostasis_strength < 0
+            or self.homeostasis_max_current < 0
+        ):
+            raise ValueError("rate, strength, and current values must be non-negative")
+
     def build(self) -> NetworkBundle:
         input_features = self.input_features
         hidden_neurons = self.hidden_neurons
@@ -98,8 +145,6 @@ class NetworkConfig:
         neurons_per_action = self.neurons_per_action
         affect_names = self.affect_names
         neurons_per_affect = self.neurons_per_affect
-        if input_features <= BOUNDARY_CHANNEL_COUNT:
-            raise ValueError("input_features must leave room for boundary channels")
         affect_start = input_features + hidden_neurons
         action_start = affect_start + len(affect_names) * neurons_per_affect
         char_start = action_start + len(action_names) * neurons_per_action

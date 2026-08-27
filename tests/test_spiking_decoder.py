@@ -33,6 +33,14 @@ def test_local_teacher_alignment_changes_token_synapses() -> None:
     assert not np.array_equal(before, after)
 
 
+def test_response_event_training_restores_idle_lifecycle() -> None:
+    agent = ConversationAgent()
+    agent.train_response_events(Action.ANSWER, agent.language.target_tokens("hi"))
+
+    assert agent.runtime.response_session.state.value == "idle"
+    assert agent.runtime.output_readout.events == []
+
+
 def test_supervised_teacher_updates_existing_hidden_output_edges() -> None:
     agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
     edges = agent.runtime.hidden_output_edge_indices
@@ -69,6 +77,16 @@ def test_repeated_event_has_no_output_feedback() -> None:
     assert not np.any(
         np.isin(agent.runtime.network.synapses.source, np.arange(output.start, output.stop))
     )
+
+
+def test_response_teacher_respects_ablation() -> None:
+    agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
+    edges = agent.runtime.hidden_output_edge_indices.copy()
+    agent.runtime.ablate_edges(edges)
+
+    agent.train_response_events(Action.ANSWER, ("m", "<EOS>"))
+
+    np.testing.assert_array_equal(agent.runtime.network.synapses.weight[edges], 0.0)
 
 
 def test_spiking_response_has_bounded_output_and_eos_control() -> None:

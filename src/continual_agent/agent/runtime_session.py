@@ -54,6 +54,25 @@ class RuntimeSession:
             plasticity_eligibility=self.runtime.plasticity.eligibility,
         )
 
+    def reproducibility_snapshot(self) -> dict[str, object]:
+        return {
+            "network": self.runtime.network.state_snapshot(),
+            "weights": self.runtime.network.synapses.weight.copy(),
+            "eligibility": self.runtime.plasticity.eligibility.copy(),
+            "background_drive": self.runtime.background_drive.state_snapshot(),
+        }
+
+    def restore_reproducibility_snapshot(self, snapshot: dict[str, object]) -> None:
+        network = snapshot["network"]
+        assert isinstance(network, dict)
+        self.runtime.network.restore_state(network)
+        self.runtime.network.synapses.weight[:] = snapshot["weights"]
+        self.runtime.plasticity.eligibility[:] = snapshot["eligibility"]
+        drive = snapshot["background_drive"]
+        assert isinstance(drive, dict)
+        self.runtime.background_drive.restore_state(drive)
+        self.runtime.apply_ablation_mask()
+
     def start(self, *, affect: object | None = None, working_memory: object | None = None) -> None:
         session = self.response
         if session.state in (
@@ -149,12 +168,26 @@ class RuntimeSession:
         isolated.metrics.voltage_square_sum = source.metrics.voltage_square_sum.copy()
         isolated.metrics.voltage_minimum = source.metrics.voltage_minimum.copy()
         isolated.metrics.voltage_maximum = source.metrics.voltage_maximum.copy()
-        isolated.plugins = [
+        copied_plugins: list[object] = []
+        for plugin in source.plugins:
+            if isinstance(plugin, MetricsPlugin):
+                copied_plugins.append(MetricsPlugin(isolated.metrics))
+            elif isinstance(plugin, HomeostasisPlugin):
+                copied_plugins.append(HomeostasisPlugin(isolated.homeostasis))
+            elif isinstance(plugin, PlasticityPlugin):
+                copied_plugins.append(PlasticityPlugin(isolated.plasticity))
+            else:
+                try:
+                    copied_plugins.append(deepcopy(plugin))
+                except Exception as exc:
+                    raise TypeError(f"plugin {type(plugin).__name__} cannot be isolated") from exc
+        isolated.plugins = copied_plugins
+        isolated.metrics_plugin = next(
+            (plugin for plugin in copied_plugins if isinstance(plugin, MetricsPlugin)),
             MetricsPlugin(isolated.metrics),
-            HomeostasisPlugin(isolated.homeostasis),
-            PlasticityPlugin(isolated.plasticity),
-        ]
-        isolated.metrics_plugin = isolated.plugins[0]
+        )
+        if not any(isinstance(plugin, MetricsPlugin) for plugin in copied_plugins):
+            isolated.plugins.insert(0, isolated.metrics_plugin)
         isolated._context = NetworkContext(
             isolated.network.tick,
             isolated.network.neurons.voltage,

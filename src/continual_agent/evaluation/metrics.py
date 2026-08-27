@@ -27,7 +27,7 @@ def run_curriculum(
     for _ in range(repetitions):
         for scenario in scenarios:
             result = agent.train_response(scenario.messages[0], scenario.expected)
-            reward = 1.0 if result.action == scenario.expected else -1.0
+            reward = scenario.reward_for(result.action)
             report.rewards.append(reward)
             report.actions.append(result.action.value)
     return report
@@ -42,6 +42,6 @@ def evaluate_affect_targets(
     agent.affect.observe(scenario.affect_event)
     values = agent.affect.as_dict()
     return {
-        name: lower <= values[name] <= upper
+        name: name in values and lower <= values[name] <= upper
         for name, (lower, upper) in scenario.affect_targets.items()
     }

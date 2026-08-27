@@ -59,6 +59,18 @@ class BackgroundDrive:
             np.multiply(self._random, self.current, out=self._sample)
             np.add(output, self._sample, out=output)
 
+    def state_snapshot(self) -> dict[str, object]:
+        return {
+            "rate": self.rate,
+            "current": self.current,
+            "rng_state": self.rng.bit_generator.state,
+        }
+
+    def restore_state(self, snapshot: dict[str, object]) -> None:
+        self.rate = float(snapshot["rate"])  # type: ignore[arg-type]
+        self.current = float(snapshot["current"])  # type: ignore[arg-type]
+        self.rng.bit_generator.state = snapshot["rng_state"]  # type: ignore[assignment]
+
 
 class HomeostasisDrive:
     def __init__(self, homeostasis: object) -> None:

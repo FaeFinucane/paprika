@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable
@@ -65,6 +66,12 @@ class TargetEvent:
     label: str
     timestamp: int | None = None
 
+    def __post_init__(self) -> None:
+        if not self.label:
+            raise ValueError("target label must not be empty")
+        if self.timestamp is not None and self.timestamp < 0:
+            raise ValueError("target timestamp must be non-negative")
+
 
 @dataclass(frozen=True)
 class SilenceInterval:
@@ -98,6 +105,18 @@ class EventStreamConfig:
             self.early_tolerance is not None and self.early_tolerance < 0
         ):
             raise ValueError("timing windows must be non-negative")
+        values = (
+            self.correct_reward,
+            self.incorrect_reward,
+            self.missing_reward,
+            self.silence_reward,
+            self.unwanted_reward,
+            self.premature_eos_reward,
+            self.missing_eos_reward,
+            self.post_eos_reward,
+        )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("event rewards must be finite")
 
 
 @dataclass(frozen=True)
@@ -229,6 +248,8 @@ def evaluate_event_stream(
         raise ValueError("observed timestamps must increase")
     if end_time is not None and end_time < 0:
         raise ValueError("end_time must be non-negative")
+    if end_time is not None and observed_timestamps and end_time < max(observed_timestamps):
+        raise ValueError("end_time must be at least the latest observed timestamp")
     if withheld_prefix < 0 or withheld_prefix > len(expected):
         raise ValueError("withheld_prefix must be within the target stream")
     if any(target.label == "<EOS>" for target in expected[:withheld_prefix]):

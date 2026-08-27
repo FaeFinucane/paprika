@@ -23,31 +23,35 @@ class EventTrainingMixin:
     def train_response_events(self: Any, act: Action, target_events: Iterable[str]) -> None:
         context = self.encoder.feature_vector(act.value)
         blank = np.zeros(self.config.input_features)
-        for event_index, event in enumerate(target_events):
-            token = getattr(event, "label", event)
-            current = self._frame_current(context if event_index == 0 else blank)
-            emitted = self.runtime.step(current)
-            source_activity = np.maximum(
-                self.runtime.network.neurons.voltage, emitted.astype(float)
-            )
-            if event_index == 0:
-                self.language.align_next_token(
-                    self.runtime.network.synapses,
-                    self.runtime.token_input_edge_indices,
-                    context,
-                    token,
+        self.runtime.trainer._prepare()
+        try:
+            for event_index, event in enumerate(target_events):
+                token = getattr(event, "label", event)
+                current = self._frame_current(context if event_index == 0 else blank)
+                emitted = self.runtime.step(current)
+                source_activity = np.maximum(
+                    self.runtime.network.neurons.voltage, emitted.astype(float)
                 )
-            self.language.align_hidden_output_token(
-                self.runtime.network.synapses,
-                self.runtime.hidden_output_edge_indices,
-                source_activity,
-                token,
-                layout=self.runtime.layout,
-            )
-            teacher = self._frame_current(blank)
-            teacher[self.runtime.layout.subgroup(Population.OUTPUT_CHAR, token)] += 3.0
-            self.runtime.step(teacher)
-        self.runtime.plasticity.reset_traces()
+                if event_index == 0:
+                    self.language.align_next_token(
+                        self.runtime.network.synapses,
+                        self.runtime.token_input_edge_indices,
+                        context,
+                        token,
+                    )
+                self.language.align_hidden_output_token(
+                    self.runtime.network.synapses,
+                    self.runtime.hidden_output_edge_indices,
+                    source_activity,
+                    token,
+                    layout=self.runtime.layout,
+                )
+                teacher = self._frame_current(blank)
+                teacher[self.runtime.layout.subgroup(Population.OUTPUT_CHAR, token)] += 3.0
+                self.runtime.step(teacher)
+                self.runtime.apply_ablation_mask()
+        finally:
+            self.runtime.trainer._reset()
 
     def train_input_events(
         self: Any, events: Iterable[InputSignal | tuple[np.ndarray, str]]

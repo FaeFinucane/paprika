@@ -184,6 +184,8 @@ class SessionExecutionSnapshot:
             raise ValueError("weight delta index is out of bounds")
         if not np.isfinite(delta).all():
             raise ValueError("weight delta values must be finite")
+        if np.unique(indices).size != indices.size:
+            raise ValueError("weight delta indices must be unique")
         self._updates.append(WeightDelta(indices, delta, self.weights[indices]))
         self.weights[indices] += delta
 
@@ -196,6 +198,8 @@ class SessionExecutionSnapshot:
             raise ValueError("indices and updated values must have equal 1D shapes")
         if np.any(indices < 0) or np.any(indices >= self.weights.size):
             raise ValueError("weight update index is out of bounds")
+        if not np.isfinite(updated).all():
+            raise ValueError("weight update values must be finite")
         self.record_weight_delta(indices, updated - self.weights[indices])
 
     def merge_into(
@@ -226,6 +230,7 @@ class SessionExecutionSnapshot:
                 shared[update.indices] = (current + proposed) / 2.0
             else:
                 shared[update.indices] = proposed
+        self._updates.clear()
 
 
 @dataclass

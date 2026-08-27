@@ -107,6 +107,14 @@ def test_weight_delta_merges_only_recorded_indices() -> None:
 
     execution.merge_into(shared)
     np.testing.assert_allclose(shared, [1.0, 2.25, 3.0])
+    execution.merge_into(shared)
+    np.testing.assert_allclose(shared, [1.0, 2.25, 3.0])
+
+
+def test_weight_delta_rejects_duplicate_indices() -> None:
+    execution = SessionExecutionSnapshot(snapshot(), np.array([1.0, 2.0]))
+    with pytest.raises(ValueError, match="unique"):
+        execution.record_weight_delta(np.array([0, 0]), np.array([0.1, 0.2]))
 
 
 def test_weight_conflict_policy_is_explicit() -> None:

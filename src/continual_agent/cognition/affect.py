@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, fields
 
 
 def _clip(value: float, lower: float = 0.0, upper: float = 1.0) -> float:
@@ -52,6 +53,11 @@ class AffectiveState:
     )
 
     def __post_init__(self) -> None:
+        values = [getattr(self, item.name) for item in fields(self) if item.name != "_baselines"]
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("affective state values must be finite")
+        if self.update_rate < 0 or self.decay_rate < 0:
+            raise ValueError("affect rates must be non-negative")
         self._bound_state()
 
     def _bound_state(self) -> None:
@@ -91,6 +97,17 @@ class AffectiveState:
     def observe(self, event: AffectiveEvent) -> None:
         """Update state from an event and its delayed outcome."""
 
+        event_values = (
+            event.reward_prediction_error,
+            event.novelty,
+            event.learning_progress,
+            event.threat,
+            event.urgency,
+            event.uncertainty,
+            event.social_feedback,
+        )
+        if not all(math.isfinite(value) for value in event_values):
+            raise ValueError("affective event values must be finite")
         rpe = max(-1.0, min(1.0, event.reward_prediction_error))
         threat = _clip(event.threat)
         urgency = _clip(event.urgency)

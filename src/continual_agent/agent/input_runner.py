@@ -53,9 +53,7 @@ class InputRunner:
                 runtime._apply_supervised_target(frame, target)
                 if hidden_retention:
                     self._apply_delayed_copy_baseline(frame)
-                teacher = build(np.zeros(runtime.input_features))
-                teacher[runtime.layout.subgroup(Population.OUTPUT_CHAR, target)] += 3.0
-                runtime.step(teacher)
+                # Apply the teacher as a weight target, without inventing a tick.
             if ended:
                 emitted = runtime.step(build(np.zeros(runtime.input_features)))
                 runtime._apply_boundary_target("<EOS>", emitted)
@@ -88,7 +86,10 @@ class InputRunner:
         runtime.apply_ablation_mask()
 
     def train_reward_modulated(
-        self, events: Iterable[InputSignal | tuple[np.ndarray, str]]
+        self,
+        events: Iterable[InputSignal | tuple[np.ndarray, str]],
+        *,
+        targets: Iterable[str] = (),
     ) -> tuple[OutputEvent, ...]:
         runtime = self.runtime
         self._prepare()
@@ -136,6 +137,13 @@ class InputRunner:
                 raise ValueError("training input must contain input boundaries")
             runtime.response_session.begin_response()
             runtime.response_session.abort(runtime.session.snapshot())
+            target_values = tuple(targets)
+            if target_values:
+                from continual_agent.evaluation.event_stream import evaluate_event_stream
+
+                report = evaluate_event_stream(target_values, tuple(observed), end_time=clock)
+                runtime.plasticity.reinforce(report.total_reward)
+            runtime.plasticity.reset_traces()
             return tuple(observed)
         except Exception:
             self._reset()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from threading import RLock
 from typing import Any, Callable, Iterable, TypeVar
 
 import numpy as np
@@ -54,6 +55,7 @@ class SpikingRuntime:
         bundle = config.build()
         self.__dict__.update(bundle.__dict__)
         self._context = bundle.context
+        self._ablation_lock = RLock()
         self.session = RuntimeSession(self)
         self.trainer = InputRunner(self)
         self.reset_diagnostics()
@@ -76,6 +78,12 @@ class SpikingRuntime:
     @property
     def network_state(self) -> dict[str, object]:
         return self.network.state_snapshot()
+
+    def reproducibility_snapshot(self) -> dict[str, object]:
+        return self.session.reproducibility_snapshot()
+
+    def restore_reproducibility_snapshot(self, snapshot: dict[str, object]) -> None:
+        self.session.restore_reproducibility_snapshot(snapshot)
 
     @property
     def diagnostics(self) -> dict[str, float]:
@@ -196,9 +204,12 @@ class SpikingRuntime:
         )
 
     def train_reward_modulated_events(
-        self, events: Iterable[InputSignal | tuple[np.ndarray, str]]
+        self,
+        events: Iterable[InputSignal | tuple[np.ndarray, str]],
+        *,
+        targets: Iterable[str] = (),
     ) -> tuple[OutputEvent, ...]:
-        return self.trainer.train_reward_modulated(events)
+        return self.trainer.train_reward_modulated(events, targets=targets)
 
     def run_input_events(
         self,
@@ -224,11 +235,13 @@ class SpikingRuntime:
         self.trainer._boundary_target(target, emitted)
 
     def ablate_edges(self, indices: np.ndarray) -> None:
-        indices = np.asarray(indices, dtype=np.int64).ravel()
-        if np.any(indices < 0) or np.any(indices >= self.edge_enabled.size):
-            raise ValueError("ablation edge index is out of bounds")
-        self.edge_enabled[indices] = False
-        self.apply_ablation_mask()
+        with self._ablation_lock:
+            indices = np.asarray(indices, dtype=np.int64).ravel()
+            if np.any(indices < 0) or np.any(indices >= self.edge_enabled.size):
+                raise ValueError("ablation edge index is out of bounds")
+            self.edge_enabled[indices] = False
+            self.apply_ablation_mask()
 
     def apply_ablation_mask(self) -> None:
-        self.network.synapses.weight[~self.edge_enabled] = 0.0
+        with self._ablation_lock:
+            self.network.synapses.weight[~self.edge_enabled] = 0.0
