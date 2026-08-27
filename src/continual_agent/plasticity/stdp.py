@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from continual_agent.simulation.synapses import SparseSynapses
+from continual_agent.simulation.synapses import SYNAPTIC_WEIGHT_LIMIT, SparseSynapses
 
 
 class RewardModulatedSTDP:
@@ -24,7 +24,7 @@ class RewardModulatedSTDP:
         learning_rate: float = 0.01,
         potentiation: float = 1.0,
         depression: float = 0.75,
-        weight_limit: float = 1.0,
+        weight_limit: float = SYNAPTIC_WEIGHT_LIMIT,
     ):
         self.synapses = synapses
         self.decay_trace = np.exp(-dt / trace_tau)
@@ -32,7 +32,9 @@ class RewardModulatedSTDP:
         self.learning_rate = learning_rate
         self.potentiation = potentiation
         self.depression = depression
-        self.weight_limit = weight_limit
+        if weight_limit <= 0.0:
+            raise ValueError("weight_limit must be positive")
+        self.weight_limit = min(weight_limit, SYNAPTIC_WEIGHT_LIMIT)
         self.pre_trace = np.zeros(synapses.neuron_count)
         self.post_trace = np.zeros(synapses.neuron_count)
         self.eligibility = np.zeros(synapses.weight.size)

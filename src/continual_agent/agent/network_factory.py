@@ -126,7 +126,11 @@ class NetworkFactory:
             for g in np.array_split(np.arange(input_features, affect_start), input_features)
         )
         for source, group in enumerate(hidden_groups):
-            self._projection(synapses, rng, np.array([source]), group, 3.0, 0.0)
+            # Use three unit-weight contacts instead of one out-of-range
+            # weight. This preserves the intended bootstrap drive while every
+            # individual synapse obeys the global bound.
+            for _ in range(3):
+                self._projection(synapses, rng, np.array([source]), group, 1.0, 0.0)
         input_hidden = np.arange(initial_edges, synapses.weight.size)
         self._projection(
             synapses, rng, np.arange(input_features), np.arange(action_start, char_start), 0.9, 0.08

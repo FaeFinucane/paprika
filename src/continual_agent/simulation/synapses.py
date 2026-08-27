@@ -6,6 +6,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
+SYNAPTIC_WEIGHT_LIMIT = 1.0
+
 
 @dataclass(frozen=True)
 class SynapticActivityState:
@@ -100,6 +102,12 @@ class SparseSynapses:
             raise ValueError("source contains an invalid neuron index")
         if np.any(self.target < 0) or np.any(self.target >= self.neuron_count):
             raise ValueError("target contains an invalid neuron index")
+        np.clip(
+            self.weight,
+            -SYNAPTIC_WEIGHT_LIMIT,
+            SYNAPTIC_WEIGHT_LIMIT,
+            out=self.weight,
+        )
 
     @classmethod
     def random(

@@ -12,7 +12,7 @@ from continual_agent.simulation import LIFNeurons, NetworkCore, SparseSynapses
 def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
     core = NetworkCore(
         LIFNeurons(2, tau_membrane=1.0, threshold=1.0, refractory_ticks=0),
-        SparseSynapses(np.array([0]), np.array([1]), np.array([2.0]), 2),
+        SparseSynapses(np.array([0]), np.array([1]), np.array([1.0]), 2),
     )
     current = np.array([2.0, 0.0])
     first = core.step(current)
@@ -22,7 +22,7 @@ def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
     np.testing.assert_array_equal(first, [True, False])
     np.testing.assert_array_equal(second, [False, True])
     assert snapshot["tick"] == 1
-    np.testing.assert_allclose(snapshot["pending_current"], [0.0, 2.0])
+    np.testing.assert_allclose(snapshot["pending_current"], [0.0, 1.0])
 
 
 def test_drive_aggregator_reuses_current_buffer() -> None:

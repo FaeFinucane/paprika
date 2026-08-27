@@ -16,10 +16,10 @@ The default configuration has 188 neurons:
 
 | Population | Size | Purpose | Implementation |
 | --- | ---: | --- | --- |
-| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled in `src/continual_agent/agent/spiking_runtime.py` |
+| `INPUT` | 48 | Rate-coded text/action features | `src/continual_agent/encoding/text_encoder.py`; assembled by `src/continual_agent/agent/network_factory.py` |
 | `HIDDEN` | 48 | Recurrent internal state | `src/continual_agent/simulation/core.py`; layout in `src/continual_agent/simulation/population_layout.py` |
 | `AFFECT` | 7 x 4 = 28 | Neural populations for valence, arousal, uncertainty, curiosity, threat, competence, and social affiliation | `src/continual_agent/cognition/affect_circuit.py` and `src/continual_agent/cognition/affect.py` |
-| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed in `src/continual_agent/agent/spiking_runtime.py` |
+| `OUTPUT_ACTION` | 7 x 4 = 28 | Typed action candidates | `src/continual_agent/cognition/readout.py`; constructed by `src/continual_agent/agent/network_factory.py` |
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
 `AgentConfig` controls these dimensions. `NetworkFactory` owns layout,
@@ -73,13 +73,17 @@ network is not reset between character events in a response.
 - `src/continual_agent/simulation/neurons.py` implements LIF voltage,
   refractory state, and updates.
 - `src/continual_agent/simulation/synapses.py` implements sparse edges and
-  trainable weights.
+  trainable weights. Every synaptic weight uses the single global bound
+  `[-1.0, 1.0]`, enforced when edges are constructed and by learning updates.
+  Strong bootstrap projections use `1.0`; current magnitude, rather than an
+  out-of-range weight, supplies their drive.
 - `src/continual_agent/cognition/working_memory.py` provides the optional
   host-side feature context controlled by `persistent_working_memory`; it is
   not a learned language-state population.
-- `src/continual_agent/agent/session.py` implements lifecycle, snapshots,
-  sparse weight deltas, and explicit merge policies. Runtime isolation is
-  implemented by `runtime_session.py`; task adapters transfer only their own state.
+- `src/continual_agent/agent/session.py` defines lifecycle, snapshots, sparse
+  weight deltas, and explicit merge policies. Runtime isolation is implemented
+  by `src/continual_agent/agent/runtime_session.py`; task adapters transfer only
+  their own state.
 - `src/continual_agent/environment/protocol.py` and `scenarios.py` define typed
   actions and curriculum scenarios.
 - `src/continual_agent/agent/debug.py` exposes inspectable response snapshots.
@@ -113,12 +117,11 @@ See [training](TRAINING.md), [tasks](TASKS.md), and the
 ## Composition boundaries
 
 `NetworkCore` owns vectorised LIF neurons, sparse synapses, pending current,
-tick/reset, and snapshots. `NetworkFactory` constructs that core and the runtime
-services in one `NetworkBundle`; neither the bundle nor `SpikingRuntime` keeps
-second neuron or synapse aliases. `BackgroundDrive` owns its stochastic-drive
-configuration and state.
+tick/reset, and snapshots. It uses reusable spike buffers and does not retain
+spike history. `NetworkFactory` constructs that core and the runtime services in
+one `NetworkBundle`; neither the bundle nor `SpikingRuntime` keeps second neuron
+or synapse aliases, and no legacy aliases are supported. `BackgroundDrive` owns
+its stochastic-drive configuration and state.
 
-`SpikingRuntime` is the composition root and owns the tick loop. `RuntimeSession`
-owns lifecycle, isolation, and weight merging. `InputRunner` owns raw episode
-execution and training. Task adapters use runtime APIs rather than exposing
-runtime internals through the `ConversationAgent` facade.
+Task adapters use runtime APIs rather than exposing runtime internals through the
+`ConversationAgent` facade.

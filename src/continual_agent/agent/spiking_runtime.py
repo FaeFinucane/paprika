@@ -241,12 +241,14 @@ class SpikingRuntime:
         response_ticks: int,
         observe_during_input: bool = True,
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
+        reward_callback: Callable[[OutputEvent], None] | None = None,
     ) -> tuple[OutputEvent, ...]:
         return self.trainer.run(
             events,
             response_ticks=response_ticks,
             observe_during_input=observe_during_input,
             current_builder=current_builder,
+            reward_callback=reward_callback,
         )
 
     def _apply_supervised_target(self, frame: np.ndarray, target: str) -> None:

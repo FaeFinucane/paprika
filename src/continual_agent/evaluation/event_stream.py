@@ -26,10 +26,12 @@ class RewardSchedule:
 
     stage: str = "early"
     correct: float = 2.0
-    incorrect: float = -0.05
+    # Early learning treats a wrong-but-timed event as a near miss: it is
+    # preferable to silence while the output stream is bootstrapping.
+    incorrect: float = 0.05
     missing: float = 0.0
     silence: float = 0.0
-    unwanted: float = -0.05
+    unwanted: float = 0.05
     premature_eos: float = -0.05
     missing_eos: float = 0.0
     post_eos: float = -0.05

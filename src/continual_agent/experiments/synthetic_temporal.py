@@ -52,6 +52,7 @@ class TemporalExperimentConfig:
     sequences: tuple[tuple[str, ...], ...] = (("A",), ("B",))
     evaluation_sequences: tuple[tuple[str, ...], ...] | None = None
     training_trials: int = 12
+    stdp_training_trials: int = 200
     ticks_per_frame: int = 3
     patience_window: int = 24
     response_ticks: int = 64
@@ -59,6 +60,8 @@ class TemporalExperimentConfig:
     seed: int = 0
     background_rate: float = 0.01
     background_current: float = 0.3
+    stdp_background_rate: float = 0.05
+    stdp_background_current: float = 0.5
     reward_stage: str = "early"
     homeostasis_enabled: bool = False
     homeostasis_target_rate: float = 0.1
@@ -72,8 +75,17 @@ class TemporalExperimentConfig:
         all_sequences = (*self.sequences, *(self.evaluation_sequences or ()))
         if any(symbol not in self.alphabet for sequence in all_sequences for symbol in sequence):
             raise ValueError("sequences must use the configured alphabet")
-        if self.training_trials < 0 or self.ticks_per_frame <= 0 or self.response_ticks <= 0:
+        if (
+            self.training_trials < 0
+            or self.stdp_training_trials < 0
+            or self.ticks_per_frame <= 0
+            or self.response_ticks <= 0
+        ):
             raise ValueError("trial and timing values must be positive")
+        if not 0.0 <= self.stdp_background_rate <= 1.0:
+            raise ValueError("stdp_background_rate must be in [0, 1]")
+        if self.stdp_background_current < 0.0:
+            raise ValueError("stdp_background_current must be non-negative")
         RewardSchedule.for_stage(self.reward_stage)
 
 
@@ -184,15 +196,21 @@ def _supervised_labels(
     return labelled
 
 
-def _make_runtime(config: TemporalExperimentConfig, seed: int) -> SpikingRuntime:
+def _make_runtime(
+    config: TemporalExperimentConfig, seed: int, *, stdp_background: bool = False
+) -> SpikingRuntime:
+    background_rate = config.stdp_background_rate if stdp_background else config.background_rate
+    background_current = (
+        config.stdp_background_current if stdp_background else config.background_current
+    )
     agent = SpikingRuntime(
         input_features=len(config.alphabet) + 2,
         hidden_neurons=config.hidden_neurons,
         output_tokens=("<EOS>", *config.alphabet),
         neurons_per_token=2,
         seed=seed,
-        background_rate=config.background_rate,
-        background_current=config.background_current,
+        background_rate=background_rate,
+        background_current=background_current,
         homeostasis_enabled=config.homeostasis_enabled,
         homeostasis_target_rate=config.homeostasis_target_rate,
         homeostasis_strength=config.homeostasis_strength,
@@ -236,10 +254,28 @@ def _train(
             agent.train_input_events(events)
         else:
             before_weights = agent.network.synapses.weight.copy()
+
+            immediate_reward = 0.0
+            position = 0
+
+            def reward_event(event: OutputEvent) -> None:
+                nonlocal immediate_reward, position
+                expected = target[position] if position < len(target) else None
+                if event.name == expected:
+                    value = reward_config.correct_reward
+                    position += 1
+                elif event.name == "<EOS>" and expected != "<EOS>":
+                    value = reward_config.premature_eos_reward
+                else:
+                    value = reward_config.incorrect_reward
+                immediate_reward += value
+                agent.plasticity.reinforce(value)
+
             observed = agent.run_input_events(
                 input_events,
                 response_ticks=config.response_ticks,
                 observe_during_input=condition is CopyCondition.IMMEDIATE,
+                reward_callback=reward_event,
             )
             report = evaluate_event_stream(
                 target,
@@ -258,7 +294,9 @@ def _train(
                 pathway_eligibility[name] += float(
                     np.abs(agent.plasticity.eligibility[indices]).sum()
                 )
-            agent.plasticity.reinforce(report.total_reward)
+            # Event rewards are committed as soon as the network emits. Any
+            # remaining score covers missing/deferred outcomes.
+            agent.plasticity.reinforce(report.total_reward - immediate_reward)
             changed = agent.network.synapses.weight - before_weights
             for name, indices in (
                 ("direct_input_output", agent.direct_input_output_edge_indices),
@@ -267,13 +305,6 @@ def _train(
             ):
                 pathway_change[name] += float(np.abs(changed[indices]).sum())
             agent.plasticity.reset_traces()
-            agent.network.reset_state()
-            agent.output_readout.reset()
-            agent.response_session = type(agent.response_session)(
-                policy=agent.response_session.policy
-            )
-        if kind is AgentKind.SUPERVISED:
-            agent.network.reset_state()
     return reward, eligibility_change, pathway_change, pathway_eligibility
 
 
@@ -306,7 +337,11 @@ def run_temporal_experiment(
                         + 10000 * list(Control).index(control)
                         + 100000 * list(AgentKind).index(kind)
                     )
-                    agent = _make_runtime(config, seed)
+                    agent = _make_runtime(
+                        config,
+                        seed,
+                        stdp_background=kind is AgentKind.REWARD_MODULATED_STDP,
+                    )
                     if control is Control.RECURRENT_ABLATION:
                         agent.ablate_edges(agent.hidden_output_edge_indices)
                     if control is Control.DIRECT_INPUT_OUTPUT_ABLATION:
@@ -340,7 +375,11 @@ def run_temporal_experiment(
                             training_target,
                             kind,
                             mode,
-                            config.training_trials,
+                            (
+                                config.stdp_training_trials
+                                if kind is AgentKind.REWARD_MODULATED_STDP
+                                else config.training_trials
+                            ),
                             condition,
                             config,
                             tuple(label for _, label in training_target),
@@ -352,6 +391,7 @@ def run_temporal_experiment(
                             {},
                             {},
                         )
+                    agent.reset_diagnostics()
                     observed = agent.run_input_events(
                         events,
                         response_ticks=config.response_ticks,

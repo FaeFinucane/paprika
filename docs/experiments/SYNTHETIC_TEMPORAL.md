@@ -39,7 +39,8 @@ Each reward-STDP training trial is evaluated before its scalar reward is applied
 the report's `total_reward` is passed to `RewardModulatedSTDP.reinforce`, and
 eligibility is reset only after that commit. The explicit `early` schedule gives
 correct events strong positive reinforcement, keeps missing output neutral, and
-makes other early errors only mildly negative; `reliable` increases penalties.
+gives a small near-miss reward to wrong timed output; `reliable` increases
+penalties.
 Reward, firing/event rates, eligibility magnitude, and pathway-specific weight
 changes are included in trial diagnostics. The
 supervised baseline remains the structural teacher-alignment baseline and is
@@ -48,6 +49,13 @@ activity rather than a fabricated `INPUT_END` feature or target-labelled EOS inp
 frame. A shuffled-target control changes the
 training/evaluation target used for learning, while final held-out scoring
 always uses the unshuffled target.
+
+The STDP learner uses a longer baby-stage curriculum by default (`200` training
+trials) and a moderate global stochastic background drive (`0.05` rate,
+`0.5` current for STDP, versus the quieter baseline drive. This keeps the young network neurally active without selecting
+or injecting an output event. The actual observed stream still determines
+reward. Missing output remains neutral in the `early` schedule, so the learner
+gets time to discover useful events before harsher penalties are introduced.
 
 Comparisons can opt into population regulation with
 `TemporalExperimentConfig(homeostasis_enabled=True)` and its target, strength,

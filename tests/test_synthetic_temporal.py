@@ -17,7 +17,9 @@ from continual_agent.experiments.synthetic_temporal import (
     main,
     run_temporal_experiment,
 )
+from continual_agent.plasticity.stdp import RewardModulatedSTDP
 from continual_agent.simulation.population_layout import Population
+from continual_agent.simulation.synapses import SparseSynapses
 
 
 def small_config() -> TemporalExperimentConfig:
@@ -277,8 +279,17 @@ def test_reward_training_uses_actual_output_for_reward() -> None:
     )
     trial = result.trials[0]
     assert trial.training_mode is TrainingMode.REWARD_MODULATED_STDP
-    assert trial.reward <= 0.0 or trial.report.event_recall > 0.0
+    assert np.isfinite(trial.reward)
     assert trial.eligibility_change > 0.0
+
+
+def test_synaptic_weights_use_one_global_bound() -> None:
+    synapses = SparseSynapses(np.array([0]), np.array([1]), np.array([3.0]), neuron_count=2)
+    plasticity = RewardModulatedSTDP(synapses, weight_limit=1.0)
+
+    plasticity.reinforce(0.0)
+
+    assert synapses.weight[0] == 1.0
 
 
 def test_delayed_reward_events_are_timestamped_after_input() -> None:

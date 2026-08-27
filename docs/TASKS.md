@@ -40,6 +40,12 @@ cleanup decisions are intentionally not listed as active tasks.
 - Measure recurrent-state persistence and capacity, and decide whether a
   dedicated learned context population is justified. Do not infer this from
   longer examples alone.
+- Compare stateful-lifetime evaluation (continuing membrane, refractory,
+  pending-current, and recurrent state) with explicit cold-start evaluation;
+  report training and evaluation metric windows separately.
+- Use the existing sparse weight-delta/session snapshots to distinguish
+  short-term neural-state learning from synaptic consolidation, including
+  pathway-specific eligibility and weight changes.
 - Add stronger dedicated event-stream tests for `ma`, `ba`, `mama`, `baba`,
   repeated characters, valid silence, premature EOS, missing EOS, and post-EOS
   suppression.

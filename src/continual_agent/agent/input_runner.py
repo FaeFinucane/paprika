@@ -127,6 +127,7 @@ class InputRunner:
         response_ticks: int,
         observe_during_input: bool = True,
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
+        reward_callback: Callable[[OutputEvent], None] | None = None,
     ) -> tuple[OutputEvent, ...]:
         if response_ticks <= 0:
             raise ValueError("response_ticks must be positive")
@@ -147,14 +148,15 @@ class InputRunner:
                             visible[eos] = emitted[eos]
                             activation = np.zeros_like(runtime.network.neurons.voltage)
                             activation[eos] = runtime.network.neurons.voltage[eos]
-                        runtime.record_output_event(
-                            runtime.output_readout.observe(
-                                visible,
-                                activation=activation,
-                                populations=(Population.OUTPUT_CHAR,),
-                                timestamp=clock,
-                            )
+                        event = runtime.output_readout.observe(
+                            visible,
+                            activation=activation,
+                            populations=(Population.OUTPUT_CHAR,),
+                            timestamp=clock,
                         )
+                        runtime.record_output_event(event)
+                        if event is not None and reward_callback is not None:
+                            reward_callback(event)
                     if item is InputSignal.INPUT_END:
                         runtime.response_session.begin_response()
                     clock += 1
@@ -165,27 +167,29 @@ class InputRunner:
                 runtime.response_session.accept_input_frame()
                 emitted = runtime.step(build(frame))
                 if observe_during_input:
-                    runtime.record_output_event(
-                        runtime.output_readout.observe(
-                            emitted,
-                            activation=runtime.network.neurons.voltage,
-                            populations=(Population.OUTPUT_CHAR,),
-                            timestamp=clock,
-                        )
-                    )
-                clock += 1
-            if runtime.response_session.state is SessionState.RECEIVING_INPUT:
-                runtime.response_session.begin_response()
-            for _ in range(response_ticks):
-                emitted = runtime.step(build(np.zeros(runtime.input_features)))
-                runtime.record_output_event(
-                    runtime.output_readout.observe(
+                    event = runtime.output_readout.observe(
                         emitted,
                         activation=runtime.network.neurons.voltage,
                         populations=(Population.OUTPUT_CHAR,),
                         timestamp=clock,
                     )
+                    runtime.record_output_event(event)
+                    if event is not None and reward_callback is not None:
+                        reward_callback(event)
+                clock += 1
+            if runtime.response_session.state is SessionState.RECEIVING_INPUT:
+                runtime.response_session.begin_response()
+            for _ in range(response_ticks):
+                emitted = runtime.step(build(np.zeros(runtime.input_features)))
+                event = runtime.output_readout.observe(
+                    emitted,
+                    activation=runtime.network.neurons.voltage,
+                    populations=(Population.OUTPUT_CHAR,),
+                    timestamp=clock,
                 )
+                runtime.record_output_event(event)
+                if event is not None and reward_callback is not None:
+                    reward_callback(event)
                 clock += 1
             runtime.response_session.abort(runtime.session.snapshot())
             complete = True
@@ -202,8 +206,15 @@ class InputRunner:
 
     def _reset(self) -> None:
         runtime = self.runtime
-        runtime.plasticity.reset_traces()
-        runtime.network.reset_state()
+        policy = runtime.response_session.policy
+        if policy.reset_neuron_state and policy.reset_synaptic_activity:
+            runtime.network.reset_state()
+        elif policy.reset_neuron_state:
+            runtime.network.reset_neuron_state()
+        elif policy.reset_synaptic_activity:
+            runtime.network.reset_synaptic_activity()
+        if not policy.persist_plasticity_eligibility:
+            runtime.plasticity.reset_traces()
         runtime.output_readout.reset()
         runtime.apply_ablation_mask()
         runtime.response_session = ResponseSession(policy=runtime.response_session.policy)

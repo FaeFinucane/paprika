@@ -21,7 +21,9 @@ by `ConversationAgent` in `src/continual_agent/agent/conversation_agent.py`.
 
 Each presented frame advances `NetworkCore`. `RewardModulatedSTDP.observe()`
 maintains pre/post traces and edge eligibility from spikes. It does not change
-weights until a later reinforcement call.
+weights until a later reinforcement call. Synaptic weights have one shared
+`[-1.0, 1.0]` bound across structural initialization, supervised updates, and
+reward-modulated STDP; there are no out-of-range bootstrap weights.
 
 Implemented in `src/continual_agent/simulation/core.py` and
 `src/continual_agent/plasticity/stdp.py`; calls are made by
@@ -97,9 +99,10 @@ working memory, and weights. It returns the callback result and validated sparse
 uses the selected conflict policy. This supports separate training sessions
 without mutating shared runtime state accidentally.
 
-Implemented by `SpikingRuntime.clone_state()` and
-`SpikingRuntime.execute_isolated()` in `src/continual_agent/agent/spiking_runtime.py`;
-`ConversationAgent` supplies only task-state transfer hooks.
+Implemented by `RuntimeSession.execute_isolated()` and its runtime clone in
+`src/continual_agent/agent/runtime_session.py`, exposed by
+`SpikingRuntime.execute_isolated()`; `ConversationAgent` supplies only task-state
+transfer hooks.
 
 Every runtime tick also updates windowed diagnostics for each named population.
 Rates are spikes per neuron per tick; active and silent fractions count neurons
@@ -130,4 +133,5 @@ Input presentations begin and end with dedicated neural boundary currents.
 current and plugins observe the resulting arrays. `RewardModulatedSTDP` owns
 eligibility and weight updates, while delayed reward is applied after readout
 evaluation. Supervised training remains an explicit runtime protocol rather than
-a second network implementation.
+a second network implementation. The runtime keeps aggregate diagnostics and
+reusable spike buffers, not a historical spike sequence.
