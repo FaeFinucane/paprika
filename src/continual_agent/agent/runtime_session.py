@@ -190,7 +190,6 @@ class RuntimeSession:
         isolated.homeostasis.drive = source.homeostasis.drive.copy()
         isolated.homeostasis._ticks = source.homeostasis._ticks
         isolated.homeostasis._spikes = source.homeostasis._spikes.copy()
-        isolated.drives = (isolated.external_drive, isolated.background_drive, isolated.homeostasis)
         isolated.metrics = RuntimeMetrics(source.layout, source.metrics.saturation_rate)
         isolated.metrics.ticks = source.metrics.ticks
         isolated.metrics.output_events = source.metrics.output_events

@@ -44,7 +44,6 @@ class SpikingRuntime:
     homeostasis: PopulationHomeostasis
     external_drive: ArrayDrive
     background_drive: BackgroundDrive
-    drives: tuple[ArrayDrive, BackgroundDrive, PopulationHomeostasis]
     plugins: list[NetworkPlugin]
     _context: NetworkContext
     input_features: int
@@ -72,7 +71,6 @@ class SpikingRuntime:
         self.homeostasis = bundle.homeostasis
         self.external_drive = bundle.external_drive
         self.background_drive = bundle.background_drive
-        self.drives = bundle.drives
         self.plugins = bundle.plugins
         self._context = bundle.context
         self.input_features = bundle.input_features
@@ -97,8 +95,9 @@ class SpikingRuntime:
             raise ValueError(f"current must have shape ({self.network.neurons.count},)")
         self.external_drive.current[:] = current
         current_buffer = np.zeros_like(current)
-        for drive in self.drives:
-            drive.add_to(current_buffer)
+        self.external_drive.add_to(current_buffer)
+        self.background_drive.add_to(current_buffer)
+        self.homeostasis.add_to(current_buffer)
         emitted = self.network.step(current_buffer)
         self._context.tick = self.network.tick
         self._context.spikes = emitted

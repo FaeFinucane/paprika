@@ -45,7 +45,6 @@ class NetworkBundle:
     homeostasis: PopulationHomeostasis
     external_drive: ArrayDrive
     background_drive: BackgroundDrive
-    drives: tuple[ArrayDrive, BackgroundDrive, PopulationHomeostasis]
     plugins: list[NetworkPlugin]
     metrics_plugin: MetricsPlugin
     context: NetworkContext
@@ -355,7 +354,6 @@ class NetworkConfig:
             self.background_current,
             initializer.seed_for("background"),
         )
-        drives = (external, background, homeostasis)
         plasticity = RewardModulatedSTDP(synapses, learning_rate=self.learning_rate)
         metrics_plugin = MetricsPlugin(metrics)
         plugins: list[NetworkPlugin] = [
@@ -383,7 +381,6 @@ class NetworkConfig:
             homeostasis,
             external,
             background,
-            drives,
             plugins,
             metrics_plugin,
             NetworkContext(network.tick, neurons.voltage, neurons.voltage),
