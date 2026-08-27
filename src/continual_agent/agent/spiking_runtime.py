@@ -61,8 +61,30 @@ class SpikingRuntime:
 
     def __init__(self, config: NetworkConfig) -> None:
         bundle = config.build()
-        self.__dict__.update(bundle.__dict__)
+        self.layout = bundle.layout
+        self.network = bundle.network
+        self.output_readout = bundle.output_readout
+        self.edge_enabled = bundle.edge_enabled
+        self.plasticity = bundle.plasticity
+        self.response_session = bundle.response_session
+        self.metrics = bundle.metrics
+        self.metrics_plugin = bundle.metrics_plugin
+        self.homeostasis = bundle.homeostasis
+        self.external_drive = bundle.external_drive
+        self.background_drive = bundle.background_drive
+        self.drives = bundle.drives
+        self.plugins = bundle.plugins
         self._context = bundle.context
+        self.input_features = bundle.input_features
+        self.output_tokens = bundle.output_tokens
+        self.neurons_per_token = bundle.neurons_per_token
+        self.hidden_feature_groups = bundle.hidden_feature_groups
+        self.direct_input_output_edge_indices = bundle.direct_input_output_edge_indices
+        self.hidden_output_edge_indices = bundle.hidden_output_edge_indices
+        self.hidden_recurrent_edge_indices = bundle.hidden_recurrent_edge_indices
+        self.token_input_edge_indices = bundle.token_input_edge_indices
+        self.affect_edge_indices = bundle.affect_edge_indices
+        self.affect_action_edge_indices = bundle.affect_action_edge_indices
         self._ablation_lock = RLock()
         self.session = RuntimeSession(self)
         self.trainer = InputRunner(self)
