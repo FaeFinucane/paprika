@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable
 from threading import RLock
-from time import perf_counter
 from typing import TypeVar
 
 import numpy as np
@@ -89,7 +88,6 @@ class SpikingRuntime:
         self.reset_diagnostics()
 
     def step(self, current: np.ndarray) -> np.ndarray:
-        started = perf_counter()
         current = np.asarray(current, dtype=float)
         if current.shape != (self.network.neurons.count,):
             raise ValueError(f"current must have shape ({self.network.neurons.count},)")
@@ -102,8 +100,6 @@ class SpikingRuntime:
         self._context.tick = self.network.tick
         self._context.spikes = emitted
         self._context.voltage = self.network.neurons.voltage
-        elapsed = perf_counter() - started
-        self._context.elapsed_seconds = elapsed
         for plugin in self.plugins:
             if self.network.tick % plugin.interval == 0:
                 plugin.after_step(self._context)

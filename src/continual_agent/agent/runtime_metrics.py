@@ -53,7 +53,6 @@ class RuntimeMetrics:
 
     def reset(self) -> None:
         self.ticks = 0
-        self.elapsed_seconds = 0.0
         self.output_events = 0
         self.spikes = np.zeros(self.layout.total_count)
         self.voltage_sum = np.zeros(self.layout.total_count)
@@ -61,7 +60,7 @@ class RuntimeMetrics:
         self.voltage_minimum = np.full(self.layout.total_count, np.inf)
         self.voltage_maximum = np.full(self.layout.total_count, -np.inf)
 
-    def record(self, spikes: np.ndarray, voltage: np.ndarray, elapsed_seconds: float = 0.0) -> None:
+    def record(self, spikes: np.ndarray, voltage: np.ndarray) -> None:
         spikes = np.asarray(spikes, dtype=float)
         voltage = np.asarray(voltage, dtype=float)
         if spikes.shape != (self.layout.total_count,) or voltage.shape != spikes.shape:
@@ -72,7 +71,6 @@ class RuntimeMetrics:
         self.voltage_square_sum += voltage * voltage
         self.voltage_minimum = np.minimum(self.voltage_minimum, voltage)
         self.voltage_maximum = np.maximum(self.voltage_maximum, voltage)
-        self.elapsed_seconds += max(0.0, float(elapsed_seconds))
 
     def record_output_event(self) -> None:
         self.output_events += 1

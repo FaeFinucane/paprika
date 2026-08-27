@@ -17,7 +17,6 @@ class NetworkContext:
     tick: int
     spikes: np.ndarray
     voltage: np.ndarray
-    elapsed_seconds: float = 0.0
 
 
 class NetworkPlugin(Protocol):
@@ -33,7 +32,7 @@ class MetricsPlugin:
         self.metrics = metrics
 
     def after_step(self, context: NetworkContext) -> None:
-        self.metrics.record(context.spikes, context.voltage, context.elapsed_seconds)
+        self.metrics.record(context.spikes, context.voltage)
 
 
 class HomeostasisPlugin:
