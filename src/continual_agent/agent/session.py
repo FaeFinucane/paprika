@@ -87,8 +87,7 @@ class SessionSnapshot:
 
     neuron_voltage: np.ndarray
     neuron_refractory: np.ndarray
-    synaptic_activity: np.ndarray
-    pending_current: np.ndarray | None = None
+    pending_current: np.ndarray
     plasticity_pre_trace: np.ndarray | None = None
     plasticity_post_trace: np.ndarray | None = None
     affect: dict[str, object] | None = None
@@ -98,11 +97,7 @@ class SessionSnapshot:
     def __post_init__(self) -> None:
         self.neuron_voltage = np.array(self.neuron_voltage, dtype=float, copy=True)
         self.neuron_refractory = np.array(self.neuron_refractory, dtype=np.int64, copy=True)
-        self.synaptic_activity = np.array(self.synaptic_activity, dtype=float, copy=True)
-        if self.pending_current is None:
-            self.pending_current = self.synaptic_activity.copy()
-        else:
-            self.pending_current = np.array(self.pending_current, dtype=float, copy=True)
+        self.pending_current = np.array(self.pending_current, dtype=float, copy=True)
         self.plasticity_pre_trace = (
             None
             if self.plasticity_pre_trace is None
@@ -126,7 +121,6 @@ class SessionSnapshot:
         return SessionSnapshot(
             self.neuron_voltage,
             self.neuron_refractory,
-            self.synaptic_activity,
             self.pending_current,
             self.plasticity_pre_trace,
             self.plasticity_post_trace,
@@ -171,7 +165,7 @@ class SessionExecutionSnapshot:
 
     def __post_init__(self) -> None:
         self.neural = self.neural.copy()
-        self._initial_synaptic_state = SynapticActivityState(self.neural.synaptic_activity)
+        self._initial_synaptic_state = SynapticActivityState(self.neural.pending_current)
         self.weights = np.asarray(self.weights, dtype=float).copy()
         if self.weights.ndim != 1 or not np.isfinite(self.weights).all():
             raise ValueError("session weights must be a finite 1D array")

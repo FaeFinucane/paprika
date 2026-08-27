@@ -50,7 +50,6 @@ class RuntimeSession:
         return SessionSnapshot(
             np.asarray(state["voltage"]),
             np.asarray(state["refractory"]),
-            np.asarray(state["pending_current"]),
             pending_current=np.asarray(state["pending_current"]),
             plasticity_pre_trace=self.runtime.plasticity.pre_trace,
             plasticity_post_trace=self.runtime.plasticity.post_trace,

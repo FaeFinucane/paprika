@@ -18,7 +18,7 @@ def snapshot() -> SessionSnapshot:
     return SessionSnapshot(
         neuron_voltage=np.array([0.2, 0.4]),
         neuron_refractory=np.array([0, 1]),
-        synaptic_activity=np.array([0.5, 0.0]),
+        pending_current=np.array([0.5, 0.0]),
         plasticity_eligibility=np.array([0.1]),
     )
 
@@ -40,7 +40,7 @@ def test_session_enforces_response_lifecycle() -> None:
     assert session.state is SessionState.IDLE
 
 
-def test_session_snapshot_isolated_and_contains_initial_synaptic_activity() -> None:
+def test_session_snapshot_isolated_and_contains_initial_pending_current() -> None:
     initial = snapshot()
     session = ResponseSession(policy=SessionPolicy(reset_membrane=True, reset_pending_current=True))
     session.begin(initial)
@@ -48,11 +48,11 @@ def test_session_snapshot_isolated_and_contains_initial_synaptic_activity() -> N
     initial.neuron_voltage[0] = 99.0
     first = session.snapshot
     assert first is not None
-    first.synaptic_activity[0] = 99.0
+    first.pending_current[0] = 99.0
     second = session.snapshot
     assert second is not None
     assert second.neuron_voltage[0] == 0.2
-    assert second.synaptic_activity[0] == 0.5
+    assert second.pending_current[0] == 0.5
     assert session.policy.reset_membrane
     assert session.policy.reset_pending_current
 
@@ -89,9 +89,9 @@ def test_parallel_execution_copies_neural_activity_and_weights() -> None:
     weights = np.array([0.2, 0.4])
     execution = SessionExecutionSnapshot(source, weights)
 
-    source.synaptic_activity[0] = 8.0
+    source.pending_current[0] = 8.0
     weights[0] = 8.0
-    execution.neural.synaptic_activity[1] = 7.0
+    execution.neural.pending_current[1] = 7.0
     execution.weights[1] = 7.0
 
     np.testing.assert_array_equal(execution.initial_synaptic_activity_state.activity, [0.5, 0.0])
