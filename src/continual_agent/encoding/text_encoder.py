@@ -86,7 +86,11 @@ class TextEncoder:
         return np.asarray(frames)
 
     def feature_vector(self, text: str) -> np.ndarray:
-        """Return a stable sparse identity code for the input message."""
+        """Return a feature-space vector, including two reserved protocol channels.
+
+        Indices 0 and 1 are boundary channels; hashed text features occupy the
+        remaining ``feature_count - 2`` dimensions.
+        """
 
         normalised = " ".join(text.lower().split()) or "<empty>"
         vector = np.zeros(self.feature_count, dtype=float)

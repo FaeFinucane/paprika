@@ -62,3 +62,22 @@ def test_shape_mismatches_are_rejected() -> None:
     neurons = LIFNeurons(count=2)
     with pytest.raises(ValueError):
         neurons.step(np.zeros(1))
+
+
+def test_restore_rejects_invalid_state() -> None:
+    network = NetworkCore.random(2, seed=1)
+    state = network.state_snapshot()
+    voltage = state["voltage"]
+    assert isinstance(voltage, np.ndarray)
+    voltage[0] = np.nan
+    with pytest.raises(ValueError, match="finite"):
+        network.restore_state(state)
+
+
+def test_reset_clears_tick_and_pending_current() -> None:
+    network = NetworkCore.random(2, seed=1)
+    network.pending_current[:] = 1.0
+    network.step(np.zeros(2))
+    network.reset_state()
+    assert network.tick == 0
+    np.testing.assert_array_equal(network.pending_current, np.zeros(2))

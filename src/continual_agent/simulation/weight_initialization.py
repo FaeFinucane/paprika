@@ -155,9 +155,17 @@ class WeightInitializer:
         spread: float,
     ) -> np.ndarray:
         source = np.repeat(sources, targets.size)
+        target = np.tile(targets, sources.size)
+        existing = set(zip(synapses.source.tolist(), synapses.target.tolist()))
+        keep = np.array(
+            [(int(s), int(t)) not in existing for s, t in zip(source, target)], dtype=bool
+        )
+        source, target = source[keep], target[keep]
+        if source.size == 0:
+            return np.array([], dtype=np.int64)
         weights = self.rng(name).normal(mean, spread, source.size)
         start = synapses.weight.size
-        synapses.add_edges(source, np.tile(targets, sources.size), weights)
+        synapses.add_edges(source, target, weights)
         return np.arange(start, synapses.weight.size)
 
     def population_projection(
@@ -171,6 +179,13 @@ class WeightInitializer:
         """Append a seeded Cartesian projection, optionally excluding self edges."""
         source = np.repeat(sources, targets.size)
         target = np.tile(targets, sources.size)
+        existing = set(zip(synapses.source.tolist(), synapses.target.tolist()))
+        keep = np.array(
+            [(int(s), int(t)) not in existing for s, t in zip(source, target)], dtype=bool
+        )
+        source, target = source[keep], target[keep]
+        if source.size == 0:
+            return np.array([], dtype=np.int64)
         if not seed.allow_self_edges:
             keep = source != target
             source = source[keep]

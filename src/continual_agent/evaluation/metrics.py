@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 
 from continual_agent.agent.conversation_agent import ConversationAgent
@@ -39,8 +40,11 @@ def evaluate_affect_targets(
 ) -> dict[str, bool]:
     """Check whether the post-event affective state meets scenario ranges."""
 
-    agent.affect.observe(scenario.affect_event)
-    values = agent.affect.as_dict()
+    if scenario.affect_event is None:
+        raise ValueError("scenario must define an affect event")
+    isolated = deepcopy(agent.affect)
+    isolated.observe(scenario.affect_event)
+    values = isolated.as_dict()
     return {
         name: name in values and lower <= values[name] <= upper
         for name, (lower, upper) in scenario.affect_targets.items()

@@ -38,19 +38,7 @@ class AffectiveState:
     energy: float = 1.0
     update_rate: float = 0.1
     decay_rate: float = 0.03
-    _baselines: dict[str, float] = field(
-        default_factory=lambda: {
-            "valence": 0.0,
-            "arousal": 0.2,
-            "uncertainty": 0.5,
-            "curiosity": 0.5,
-            "threat": 0.1,
-            "competence": 0.5,
-            "social_affiliation": 0.5,
-            "energy": 1.0,
-        },
-        repr=False,
-    )
+    _baselines: dict[str, float] | None = field(default=None, repr=False)
 
     def __post_init__(self) -> None:
         values = [getattr(self, item.name) for item in fields(self) if item.name != "_baselines"]
@@ -58,6 +46,23 @@ class AffectiveState:
             raise ValueError("affective state values must be finite")
         if self.update_rate < 0 or self.decay_rate < 0:
             raise ValueError("affect rates must be non-negative")
+        baseline_names = {
+            "valence",
+            "arousal",
+            "uncertainty",
+            "curiosity",
+            "threat",
+            "competence",
+            "social_affiliation",
+            "energy",
+        }
+        if self._baselines is None:
+            self._baselines = {name: float(getattr(self, name)) for name in baseline_names}
+        elif set(self._baselines) != baseline_names or not all(
+            math.isfinite(value) for value in self._baselines.values()
+        ):
+            raise ValueError("affective baselines must contain finite state fields")
+        assert self._baselines is not None
         self._bound_state()
 
     def _bound_state(self) -> None:
@@ -78,8 +83,10 @@ class AffectiveState:
 
         if steps < 0:
             raise ValueError("steps cannot be negative")
+        baselines = self._baselines
+        assert baselines is not None
         for _ in range(steps):
-            for name, baseline in self._baselines.items():
+            for name, baseline in baselines.items():
                 if name == "energy":
                     continue
                 value = getattr(self, name)
@@ -90,7 +97,9 @@ class AffectiveState:
     def reset(self) -> None:
         """Return affect to its configured baseline."""
 
-        for name, baseline in self._baselines.items():
+        baselines = self._baselines
+        assert baselines is not None
+        for name, baseline in baselines.items():
             setattr(self, name, baseline)
         self._bound_state()
 

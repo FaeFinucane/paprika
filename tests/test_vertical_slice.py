@@ -13,7 +13,6 @@ from continual_agent.agent.session import (
 )
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.cognition.readout import Action
-from continual_agent.cognition.working_memory import WorkingMemory
 from continual_agent.encoding.text_encoder import TextEncoder
 from continual_agent.environment.scenarios import default_scenarios
 from continual_agent.plasticity.stdp import RewardModulatedSTDP
@@ -172,11 +171,13 @@ def test_agent_applies_boundary_policy_and_captures_execution_snapshot() -> None
     agent = ConversationAgent(AgentConfig(seed=3, persistent_working_memory=True))
     agent.runtime.response_session.policy = SessionPolicy(
         reset_readout=True,
-        reset_neuron_state=True,
-        reset_synaptic_activity=True,
-        persist_affect=False,
-        persist_working_memory=False,
-        persist_plasticity_eligibility=False,
+        reset_membrane=True,
+        reset_refractory=True,
+        reset_pending_current=True,
+        reset_recurrent_activity=True,
+        reset_affect=True,
+        reset_working_memory=True,
+        reset_eligibility=True,
     )
     agent.runtime.network.neurons.voltage[0] = 0.7
     agent.runtime.network.reset_synaptic_activity()
@@ -189,8 +190,7 @@ def test_agent_applies_boundary_policy_and_captures_execution_snapshot() -> None
     assert saved is not None
     assert saved.neuron_voltage[0] == 0.0
     assert saved.working_memory is not None
-    assert isinstance(saved.working_memory, WorkingMemory)
-    assert saved.working_memory.state[0] == 0.0
+    assert saved.working_memory["state"][0] == 0.0
     assert agent.affect.valence == 0.0
     assert agent.runtime.plasticity.eligibility[0] == 0.0
     assert agent.last_execution_snapshot is not None

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 
@@ -13,19 +13,36 @@ from continual_agent.language.spiking_decoder import GeneratedResponse
 from continual_agent.simulation.population_layout import Population
 
 if TYPE_CHECKING:
-    pass
+    from continual_agent.agent.config import AgentConfig
+    from continual_agent.agent.spiking_runtime import SpikingRuntime
+    from continual_agent.cognition.affect import AffectiveState
+    from continual_agent.cognition.affect_circuit import AffectiveCircuit
+    from continual_agent.cognition.working_memory import WorkingMemory
+    from continual_agent.encoding.text_encoder import TextEncoder
+
+
+class _ResponseHost(Protocol):
+    runtime: SpikingRuntime
+    affect: AffectiveState
+    working_memory: WorkingMemory
+    encoder: TextEncoder
+    config: AgentConfig
+    actions: tuple[Action, ...]
+    affect_circuit: AffectiveCircuit
+    last_snapshot: DebugSnapshot | None
+    last_execution_snapshot: SessionExecutionSnapshot | None
+
+    def _start_response_session(self) -> None: ...
+    def _current_session_snapshot(self) -> SessionSnapshot: ...
+    def _finish_response(self, *, exhausted: bool) -> None: ...
+    def _frame_current(self, frame: np.ndarray) -> np.ndarray: ...
 
 
 class ResponseMixin:
     last_snapshot: DebugSnapshot | None
     last_execution_snapshot: SessionExecutionSnapshot | None
 
-    def _start_response_session(self: Any) -> None:
-        policy = self.runtime.response_session.policy
-        if not policy.persist_affect:
-            self.affect.reset()
-        if not policy.persist_working_memory:
-            self.working_memory.reset()
+    def _start_response_session(self: _ResponseHost) -> None:
         self.runtime.start_session(affect=self.affect, working_memory=self.working_memory)
         snapshot = self.runtime.response_session.snapshot
         assert snapshot is not None
@@ -33,10 +50,10 @@ class ResponseMixin:
             snapshot, self.runtime.network.synapses.weight
         )
 
-    def _current_session_snapshot(self: Any) -> SessionSnapshot:
+    def _current_session_snapshot(self: _ResponseHost) -> SessionSnapshot:
         return self.runtime._snapshot(self.affect, self.working_memory)
 
-    def _finish_response(self: Any, *, exhausted: bool) -> None:
+    def _finish_response(self: _ResponseHost, *, exhausted: bool) -> None:
         snapshot = self._current_session_snapshot()
         self.last_execution_snapshot = SessionExecutionSnapshot(
             snapshot, self.runtime.network.synapses.weight
@@ -45,13 +62,13 @@ class ResponseMixin:
             exhausted=exhausted, affect=self.affect, working_memory=self.working_memory
         )
 
-    def _frame_current(self: Any, frame: np.ndarray) -> np.ndarray:
+    def _frame_current(self: _ResponseHost, frame: np.ndarray) -> np.ndarray:
         current = self.runtime.current(frame, tonic_affect=True)
-        if self.runtime.response_session.policy.persist_working_memory:
+        if not self.runtime.response_session.policy.reset_working_memory:
             current[: self.config.input_features] += self.working_memory.context_current()
         return current
 
-    def respond(self: Any, text: str) -> Decision:
+    def respond(self: _ResponseHost, text: str) -> Decision:
         """Process a message and deliberate until a decision or timeout."""
         self._start_response_session()
         try:
@@ -59,8 +76,8 @@ class ResponseMixin:
             spikes: list[np.ndarray] = []
             presentation = self.encoder.present(text)
             feature_activity = self.encoder.feature_vector(text)
-            if self.runtime.response_session.policy.persist_working_memory:
-                self.working_memory.update(feature_activity)
+            if not self.runtime.response_session.policy.reset_working_memory:
+                self.working_memory.update(feature_activity, salience=1.0)
             for event in presentation:
                 if event.signal is not None:
                     self.runtime.step_input_signal(event.signal)
@@ -118,7 +135,7 @@ class ResponseMixin:
                 session.abort(self._current_session_snapshot())
 
     def generate_response(
-        self: Any, act: Action, max_tokens: int | None = None
+        self: _ResponseHost, act: Action, max_tokens: int | None = None
     ) -> GeneratedResponse:
         """Generate character events; silence is not an event."""
         limit = self.config.max_response_tokens if max_tokens is None else max_tokens

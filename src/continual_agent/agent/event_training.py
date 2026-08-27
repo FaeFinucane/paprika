@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Iterable, Protocol
 
 import numpy as np
 
@@ -10,17 +10,34 @@ from continual_agent.agent.session import InputSignal
 from continual_agent.simulation.population_layout import Population
 
 if TYPE_CHECKING:
+    from continual_agent.agent.config import AgentConfig
+    from continual_agent.agent.spiking_runtime import SpikingRuntime
     from continual_agent.cognition.readout import Action, OutputEvent
+    from continual_agent.encoding.text_encoder import TextEncoder
     from continual_agent.evaluation.event_stream import (
         EventStreamConfig,
         EventStreamReport,
         SilenceInterval,
         TargetEvent,
     )
+    from continual_agent.language.spiking_decoder import SpikingCharacterDecoder
+
+
+class _EventTrainingHost(Protocol):
+    encoder: TextEncoder
+    config: AgentConfig
+    runtime: SpikingRuntime
+    language: SpikingCharacterDecoder
+
+    def _frame_current(self, frame: np.ndarray) -> np.ndarray: ...
+    def generate_response(self, act: Action) -> object: ...
+    def apply_event_stream_reward(self, report: EventStreamReport) -> float: ...
 
 
 class EventTrainingMixin:
-    def train_response_events(self: Any, act: Action, target_events: Iterable[str]) -> None:
+    def train_response_events(
+        self: _EventTrainingHost, act: Action, target_events: Iterable[str]
+    ) -> None:
         context = self.encoder.feature_vector(act.value)
         blank = np.zeros(self.config.input_features)
         self.runtime.trainer._prepare()
@@ -54,12 +71,12 @@ class EventTrainingMixin:
             self.runtime.trainer._reset()
 
     def train_input_events(
-        self: Any, events: Iterable[InputSignal | tuple[np.ndarray, str]]
+        self: _EventTrainingHost, events: Iterable[InputSignal | tuple[np.ndarray, str]]
     ) -> None:
         self.runtime.train_input_events(events, current_builder=self._frame_current)
 
     def run_input_events(
-        self: Any,
+        self: _EventTrainingHost,
         events: Iterable[InputSignal | np.ndarray],
         *,
         response_ticks: int,
@@ -73,7 +90,7 @@ class EventTrainingMixin:
         )
 
     def train_response_stream(
-        self: Any,
+        self: _EventTrainingHost,
         act: Action,
         targets: Iterable[TargetEvent | str],
         *,

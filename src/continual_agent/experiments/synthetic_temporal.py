@@ -18,6 +18,7 @@ from continual_agent.evaluation.event_stream import (
     RewardSchedule,
     evaluate_event_stream,
 )
+from continual_agent.evaluation.reward import RewardLedger
 from continual_agent.simulation.population_layout import Population
 from continual_agent.simulation.weight_initialization import WeightInitializationConfig
 
@@ -119,6 +120,9 @@ class TemporalTrialResult:
     pathway_eligibility: dict[str, float] | None = None
     firing_rate: float = 0.0
     output_event_rate: float = 0.0
+    signed_update: float = 0.0
+    absolute_update: float = 0.0
+    clipped_update: float = 0.0
     population_diagnostics: dict[str, dict[str, float]] | None = None
     replicate: int = 0
 
@@ -171,6 +175,9 @@ class TemporalExperimentResult:
                 "eligibility_change": float(np.mean([x.eligibility_change for x in trials])),
                 "firing_rate": float(np.mean([x.firing_rate for x in trials])),
                 "output_event_rate": float(np.mean([x.output_event_rate for x in trials])),
+                "signed_update": float(np.mean([x.signed_update for x in trials])),
+                "absolute_update": float(np.mean([x.absolute_update for x in trials])),
+                "clipped_update": float(np.mean([x.clipped_update for x in trials])),
             }
             for pathway in ("direct_input_output", "hidden_output", "hidden_recurrent"):
                 metrics[f"weight_{pathway}"] = float(
@@ -273,27 +280,10 @@ def _train(
         else:
             before_weights = agent.network.synapses.weight.copy()
 
-            immediate_reward = 0.0
-            position = 0
-
-            def reward_event(event: OutputEvent) -> None:
-                nonlocal immediate_reward, position
-                expected = target[position] if position < len(target) else None
-                if event.name == expected:
-                    value = reward_config.correct_reward
-                    position += 1
-                elif event.name == "<EOS>" and expected != "<EOS>":
-                    value = reward_config.premature_eos_reward
-                else:
-                    value = reward_config.incorrect_reward
-                immediate_reward += value
-                agent.plasticity.reinforce(value)
-
             observed = agent.run_input_events(
                 input_events,
                 response_ticks=config.response_ticks,
                 observe_during_input=condition is CopyCondition.IMMEDIATE,
-                reward_callback=reward_event,
             )
             report = evaluate_event_stream(
                 target,
@@ -312,9 +302,12 @@ def _train(
                 pathway_eligibility[name] += float(
                     np.abs(agent.plasticity.eligibility[indices]).sum()
                 )
-            # Event rewards are committed as soon as the network emits. Any
-            # remaining score covers missing/deferred outcomes.
-            agent.plasticity.reinforce(report.total_reward - immediate_reward)
+            # Each ordinary event gets one diffuse third-factor update. The
+            # final report adds only outcomes not already emitted, avoiding
+            # duplicate aggregate reinforcement while preserving diffusion.
+            ledger = RewardLedger()
+            for record in report.records:
+                agent.plasticity.reinforce(ledger.commit(record.reward, record=record))
             changed = agent.network.synapses.weight - before_weights
             for name, indices in (
                 ("direct_input_output", agent.direct_input_output_edge_indices),
@@ -447,6 +440,9 @@ def run_temporal_experiment(
                                 pathway_eligibility,
                                 agent.diagnostics["firing_rate"],
                                 agent.diagnostics["output_event_rate"],
+                                agent.plasticity.total_signed_update,
+                                agent.plasticity.total_absolute_update,
+                                agent.plasticity.total_clipped_update,
                                 agent.population_diagnostics,
                                 replicate,
                             )

@@ -105,3 +105,15 @@ def test_affective_spiking_circuit_aligns_to_targets() -> None:
         "competence",
         "social_affiliation",
     }
+
+
+def test_affect_circuit_rejects_wrong_projection_geometry() -> None:
+    import pytest
+
+    circuit = AffectiveCircuit()
+    with pytest.raises(ValueError):
+        circuit.projection_prediction(
+            SparseSynapses(np.array([0]), np.array([1]), np.array([0.1]), 2),
+            np.zeros((len(circuit.signal_names), 1, circuit.neurons_per_signal), dtype=int),
+            np.zeros(2),
+        )

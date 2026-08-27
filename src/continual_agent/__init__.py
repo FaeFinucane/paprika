@@ -2,4 +2,6 @@
 
 from .simulation import NetworkCore
 
-__all__ = ["NetworkCore"]
+__all__ = [
+    "NetworkCore",
+]

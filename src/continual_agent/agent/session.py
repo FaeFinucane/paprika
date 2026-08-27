@@ -60,6 +60,10 @@ INPUT_END_CHANNEL = 1
 BOUNDARY_CHANNEL_COUNT = 2
 
 
+class SnapshotState:
+    """Protocol-like runtime state contract used by session snapshots."""
+
+
 @dataclass(frozen=True)
 class SessionPolicy:
     """Reset/persistence decisions at a response boundary.
@@ -71,11 +75,14 @@ class SessionPolicy:
     """
 
     reset_readout: bool = True
-    reset_neuron_state: bool = False
-    reset_synaptic_activity: bool = False
-    persist_affect: bool = True
-    persist_working_memory: bool = True
-    persist_plasticity_eligibility: bool = True
+    reset_membrane: bool = False
+    reset_refractory: bool = False
+    reset_pending_current: bool = False
+    reset_recurrent_activity: bool = False
+    reset_affect: bool = False
+    reset_working_memory: bool = False
+    reset_eligibility: bool = False
+    reset_background_rng: bool = False
 
 
 @dataclass
@@ -85,23 +92,48 @@ class SessionSnapshot:
     neuron_voltage: np.ndarray
     neuron_refractory: np.ndarray
     synaptic_activity: np.ndarray
-    affect: object | None = None
-    working_memory: object | None = None
+    pending_current: np.ndarray | None = None
+    plasticity_pre_trace: np.ndarray | None = None
+    plasticity_post_trace: np.ndarray | None = None
+    affect: dict[str, object] | None = None
+    working_memory: dict[str, object] | None = None
     plasticity_eligibility: np.ndarray = field(default_factory=lambda: np.array([]))
 
     def __post_init__(self) -> None:
         self.neuron_voltage = np.array(self.neuron_voltage, dtype=float, copy=True)
         self.neuron_refractory = np.array(self.neuron_refractory, dtype=np.int64, copy=True)
         self.synaptic_activity = np.array(self.synaptic_activity, dtype=float, copy=True)
+        if self.pending_current is None:
+            self.pending_current = self.synaptic_activity.copy()
+        else:
+            self.pending_current = np.array(self.pending_current, dtype=float, copy=True)
+        self.plasticity_pre_trace = (
+            None
+            if self.plasticity_pre_trace is None
+            else np.array(self.plasticity_pre_trace, dtype=float, copy=True)
+        )
+        self.plasticity_post_trace = (
+            None
+            if self.plasticity_post_trace is None
+            else np.array(self.plasticity_post_trace, dtype=float, copy=True)
+        )
         self.plasticity_eligibility = np.array(self.plasticity_eligibility, dtype=float, copy=True)
         if self.neuron_voltage.shape != self.neuron_refractory.shape:
             raise ValueError("neuron voltage and refractory state must have equal shapes")
+        for name, value in (("affect", self.affect), ("working_memory", self.working_memory)):
+            if value is not None and not isinstance(value, dict):
+                raise ValueError(f"{name} snapshot must be a dictionary")
+            if value is not None:
+                setattr(self, name, deepcopy(value))
 
     def copy(self) -> "SessionSnapshot":
         return SessionSnapshot(
             self.neuron_voltage,
             self.neuron_refractory,
             self.synaptic_activity,
+            self.pending_current,
+            self.plasticity_pre_trace,
+            self.plasticity_post_trace,
             deepcopy(self.affect),
             deepcopy(self.working_memory),
             self.plasticity_eligibility,

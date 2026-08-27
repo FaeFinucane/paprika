@@ -103,10 +103,37 @@ class NetworkConfig:
             value = getattr(self, name)
             if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
                 raise ValueError(f"{name} must be a positive integer")
+        if not isinstance(self.output_tokens, tuple):
+            raise ValueError("output_tokens must be a tuple")
+        for name in ("action_names", "affect_names", "homeostasis_populations"):
+            if not isinstance(getattr(self, name), tuple):
+                raise ValueError(f"{name} must be a tuple")
+        if not isinstance(self.session_policy, SessionPolicy):
+            raise ValueError("session_policy must be a SessionPolicy")
+        if self.weight_initialization is not None and not isinstance(
+            self.weight_initialization, WeightInitializationConfig
+        ):
+            raise ValueError("weight_initialization must be a WeightInitializationConfig or None")
         if self.input_features <= BOUNDARY_CHANNEL_COUNT:
             raise ValueError("input_features must leave room for boundary channels")
         if not self.output_tokens:
             raise ValueError("output_tokens must not be empty")
+        if any(not isinstance(token, str) or not token for token in self.output_tokens):
+            raise ValueError("output_tokens must contain non-empty strings")
+        if "<EOS>" not in self.output_tokens:
+            raise ValueError("output_tokens must contain <EOS>")
+        for name, values in (
+            ("action_names", self.action_names),
+            ("affect_names", self.affect_names),
+        ):
+            if len(set(values)) != len(values) or any(
+                not isinstance(value, str) or not value for value in values
+            ):
+                raise ValueError(f"{name} must contain unique non-empty strings")
+        if len(set(self.output_tokens)) != len(self.output_tokens):
+            raise ValueError("output_tokens must be unique")
+        if not isinstance(self.seed, (int, np.integer)) or isinstance(self.seed, bool):
+            raise ValueError("seed must be an integer")
         numeric_fields = (
             "connection_probability",
             "learning_rate",
@@ -135,6 +162,10 @@ class NetworkConfig:
             or self.homeostasis_max_current < 0
         ):
             raise ValueError("rate, strength, and current values must be non-negative")
+        if any(
+            not isinstance(population, Population) for population in self.homeostasis_populations
+        ):
+            raise ValueError("homeostasis_populations must contain Population values")
 
     def build(self) -> NetworkBundle:
         input_features = self.input_features
@@ -183,7 +214,64 @@ class NetworkConfig:
         # Character neurons are terminal readout populations.  Filter the
         # random graph before appending projections so this invariant covers
         # accidental base-random contacts as well as explicit pathways.
-        valid = synapses.source < char_start
+        explicit_pairs = np.concatenate(
+            (
+                np.stack(
+                    np.meshgrid(
+                        np.arange(input_features),
+                        np.arange(input_features, affect_start),
+                        indexing="ij",
+                    ),
+                    axis=-1,
+                ).reshape(-1, 2),
+                np.stack(
+                    np.meshgrid(
+                        np.arange(input_features),
+                        np.arange(affect_start, action_start),
+                        indexing="ij",
+                    ),
+                    axis=-1,
+                ).reshape(-1, 2),
+                np.stack(
+                    np.meshgrid(
+                        np.arange(input_features),
+                        np.arange(action_start, char_start),
+                        indexing="ij",
+                    ),
+                    axis=-1,
+                ).reshape(-1, 2),
+                np.stack(
+                    np.meshgrid(
+                        np.arange(input_features), np.arange(char_start, total), indexing="ij"
+                    ),
+                    axis=-1,
+                ).reshape(-1, 2),
+                np.stack(
+                    np.meshgrid(
+                        np.arange(input_features, affect_start),
+                        np.arange(char_start, total),
+                        indexing="ij",
+                    ),
+                    axis=-1,
+                ).reshape(-1, 2),
+                np.stack(
+                    np.meshgrid(
+                        np.arange(affect_start, action_start),
+                        np.arange(action_start, char_start),
+                        indexing="ij",
+                    ),
+                    axis=-1,
+                ).reshape(-1, 2),
+            )
+        )
+        explicit = set(map(tuple, explicit_pairs.tolist()))
+        valid = np.array(
+            [
+                (int(source), int(target)) not in explicit and target < char_start
+                for source, target in zip(synapses.source, synapses.target)
+            ],
+            dtype=bool,
+        )
         synapses = SparseSynapses(
             synapses.source[valid],
             synapses.target[valid],
@@ -226,8 +314,7 @@ class NetworkConfig:
             c.input_action_mean,
             c.input_action_spread,
         )
-        affect_edges = synapses.weight.size
-        initializer.projection(
+        affect_edges = initializer.projection(
             synapses,
             "input_affect",
             np.arange(input_features),
@@ -235,11 +322,9 @@ class NetworkConfig:
             c.input_affect_mean,
             c.input_affect_spread,
         )
-        affect_indices = (
-            np.arange(affect_edges, synapses.weight.size)
-            .reshape(input_features, len(affect_names), neurons_per_affect)
-            .transpose(1, 0, 2)
-        )
+        affect_indices = affect_edges.reshape(
+            input_features, len(affect_names), neurons_per_affect
+        ).transpose(1, 0, 2)
         affect_action_edges = synapses.weight.size
         initializer.projection(
             synapses,
@@ -250,38 +335,29 @@ class NetworkConfig:
             c.affect_action_spread,
         )
         affect_action_indices = np.arange(affect_action_edges, synapses.weight.size)
-        token_edges = synapses.weight.size
         initializer.projection(
             synapses,
             "recurrent_output",
-            np.arange(char_start),
+            np.arange(char_start, total),
             np.arange(char_start, total),
             c.recurrent_output_mean,
             c.recurrent_output_spread,
         )
-        projection = self._projection_indices
-        direct = (
-            token_edges + projection(input_features, len(output_tokens), neurons_per_token).ravel()
+        direct = initializer.projection(
+            synapses,
+            "direct_output",
+            np.arange(input_features),
+            np.arange(char_start, total),
+            c.direct_output_mean,
+            c.direct_output_spread,
         )
-        hidden = (
-            token_edges
-            + projection(input_features + hidden_neurons, len(output_tokens), neurons_per_token)[
-                input_features : input_features + hidden_neurons
-            ].ravel()
-        )
-        synapses.weight[direct] = np.clip(
-            initializer.rng("direct_output").normal(
-                c.direct_output_mean, c.direct_output_spread, direct.size
-            ),
-            -1.0,
-            1.0,
-        )
-        synapses.weight[hidden] = np.clip(
-            initializer.rng("hidden_output").normal(
-                c.hidden_output_mean, c.hidden_output_spread, hidden.size
-            ),
-            -1.0,
-            1.0,
+        hidden = initializer.projection(
+            synapses,
+            "hidden_output",
+            np.arange(input_features, affect_start),
+            np.arange(char_start, total),
+            c.hidden_output_mean,
+            c.hidden_output_spread,
         )
         network = NetworkCore(neurons, synapses)
         metrics = RuntimeMetrics(layout)
@@ -344,16 +420,4 @@ class NetworkConfig:
             hidden,
             direct.reshape(input_features, len(output_tokens), neurons_per_token),
             hidden_recurrent,
-        )
-
-    @staticmethod
-    def _projection_indices(
-        source_count: int, token_count: int, neurons_per_token: int
-    ) -> np.ndarray:
-        size = token_count * neurons_per_token
-        return np.array(
-            [
-                np.arange(i * size, (i + 1) * size).reshape(token_count, neurons_per_token)
-                for i in range(source_count)
-            ]
         )

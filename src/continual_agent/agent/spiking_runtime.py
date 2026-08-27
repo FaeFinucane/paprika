@@ -2,22 +2,30 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable, Mapping
 from threading import RLock
-from typing import Any, Callable, Iterable, TypeVar
+from time import perf_counter
+from typing import TypeVar
 
 import numpy as np
 
+from continual_agent.agent.drives import ArrayDrive, BackgroundDrive, DriveAggregator
 from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.network_config import NetworkConfig
-from continual_agent.agent.plugins import NetworkContext
+from continual_agent.agent.plugins import MetricsPlugin, NetworkContext, NetworkPlugin
+from continual_agent.agent.population_homeostasis import PopulationHomeostasis
+from continual_agent.agent.runtime_metrics import RuntimeMetrics
 from continual_agent.agent.runtime_session import RuntimeSession
 from continual_agent.agent.session import (
     ConflictPolicy,
     InputSignal,
+    ResponseSession,
     SessionExecutionSnapshot,
 )
-from continual_agent.cognition.readout import OutputEvent
-from continual_agent.simulation.population_layout import Population
+from continual_agent.cognition.readout import EventReadout, OutputEvent
+from continual_agent.plasticity.stdp import RewardModulatedSTDP
+from continual_agent.simulation.core import NetworkCore
+from continual_agent.simulation.population_layout import Population, PopulationLayout
 
 T = TypeVar("T")
 
@@ -25,31 +33,31 @@ T = TypeVar("T")
 class SpikingRuntime:
     """Compose network services while keeping one vectorised tick loop."""
 
-    layout: Any
-    network: Any
-    output_readout: Any
-    edge_enabled: Any
-    plasticity: Any
-    response_session: Any
-    metrics: Any
-    metrics_plugin: Any
-    homeostasis: Any
-    external_drive: Any
-    background_drive: Any
-    drives: Any
-    plugins: Any
+    layout: PopulationLayout
+    network: NetworkCore
+    output_readout: EventReadout
+    edge_enabled: np.ndarray
+    plasticity: RewardModulatedSTDP
+    response_session: ResponseSession
+    metrics: RuntimeMetrics
+    metrics_plugin: MetricsPlugin
+    homeostasis: PopulationHomeostasis
+    external_drive: ArrayDrive
+    background_drive: BackgroundDrive
+    drives: DriveAggregator
+    plugins: list[NetworkPlugin]
     _context: NetworkContext
     input_features: int
     output_tokens: tuple[str, ...]
     neurons_per_token: int
-    hidden_feature_groups: Any
-    direct_input_output_edge_indices: Any
-    hidden_output_edge_indices: Any
-    hidden_recurrent_edge_indices: Any
-    token_input_edge_indices: Any
-    affect_edge_indices: Any
-    affect_action_edge_indices: Any
-    trainer: Any
+    hidden_feature_groups: tuple[np.ndarray, ...]
+    direct_input_output_edge_indices: np.ndarray
+    hidden_output_edge_indices: np.ndarray
+    hidden_recurrent_edge_indices: np.ndarray
+    token_input_edge_indices: np.ndarray
+    affect_edge_indices: np.ndarray
+    affect_action_edge_indices: np.ndarray
+    trainer: InputRunner
 
     def __init__(self, config: NetworkConfig) -> None:
         bundle = config.build()
@@ -61,6 +69,7 @@ class SpikingRuntime:
         self.reset_diagnostics()
 
     def step(self, current: np.ndarray) -> np.ndarray:
+        started = perf_counter()
         current = np.asarray(current, dtype=float)
         if current.shape != (self.network.neurons.count,):
             raise ValueError(f"current must have shape ({self.network.neurons.count},)")
@@ -69,6 +78,8 @@ class SpikingRuntime:
         self._context.tick = self.network.tick
         self._context.spikes = emitted
         self._context.voltage = self.network.neurons.voltage
+        elapsed = perf_counter() - started
+        self._context.elapsed_seconds = elapsed
         for plugin in self.plugins:
             if self.network.tick % plugin.interval == 0:
                 plugin.after_step(self._context)
@@ -76,7 +87,7 @@ class SpikingRuntime:
         return emitted
 
     @property
-    def network_state(self) -> dict[str, object]:
+    def network_state(self) -> Mapping[str, object]:
         return self.network.state_snapshot()
 
     def reproducibility_snapshot(self) -> dict[str, object]:

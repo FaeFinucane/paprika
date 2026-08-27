@@ -48,3 +48,9 @@ def test_working_memory_persists_without_voltage_readout_evidence() -> None:
 
     assert np.any(with_context.working_memory.state != without_context.working_memory.state)
     assert contextual.timed_out and without.timed_out
+
+
+def test_working_memory_salience_and_bounds_change_context() -> None:
+    memory = WorkingMemory(size=2, decay=1.0)
+    np.testing.assert_allclose(memory.update(np.array([2.0, -2.0]), salience=0.5), [1.0, -1.0])
+    np.testing.assert_allclose(memory.context_current(gain=0.5), [0.5, -0.5])

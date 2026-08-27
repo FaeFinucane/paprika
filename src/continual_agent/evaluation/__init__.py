@@ -1,24 +1,5 @@
-"""Experiment metrics."""
+"""Evaluation subpackage.
 
-from .event_stream import (
-    AccountedEvent,
-    EventOutcome,
-    EventStreamConfig,
-    EventStreamReport,
-    SilenceInterval,
-    TargetEvent,
-    evaluate_event_stream,
-)
-from .metrics import TrainingReport, run_curriculum
-
-__all__ = [
-    "AccountedEvent",
-    "EventOutcome",
-    "EventStreamConfig",
-    "EventStreamReport",
-    "SilenceInterval",
-    "TargetEvent",
-    "TrainingReport",
-    "evaluate_event_stream",
-    "run_curriculum",
-]
+Import concrete APIs from ``event_stream`` or ``metrics`` to avoid importing
+the agent facade while it is being constructed.
+"""

@@ -41,3 +41,13 @@ class WorkingMemory:
 
     def snapshot(self) -> dict[str, object]:
         return {"turns": self.turns, "state": self.state.tolist()}
+
+    def restore(self, snapshot: dict[str, object]) -> None:
+        state = np.asarray(snapshot["state"], dtype=float)
+        if state.shape != (self.size,):
+            raise ValueError("working-memory snapshot has the wrong shape")
+        self.state[:] = state
+        turns = snapshot["turns"]
+        if isinstance(turns, bool) or not isinstance(turns, int) or turns < 0:
+            raise ValueError("working-memory turns must be a non-negative integer")
+        self.turns = turns

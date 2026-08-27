@@ -30,8 +30,14 @@ class AffectiveCircuit:
     signal_names = AFFECT_SIGNALS
 
     def __init__(self, neurons_per_signal: int = 4, learning_rate: float = 0.12):
-        if neurons_per_signal <= 0:
+        if (
+            isinstance(neurons_per_signal, bool)
+            or not isinstance(neurons_per_signal, int)
+            or neurons_per_signal <= 0
+        ):
             raise ValueError("neurons_per_signal must be positive")
+        if not np.isfinite(learning_rate) or learning_rate < 0:
+            raise ValueError("learning_rate must be finite and non-negative")
         self.neurons_per_signal = neurons_per_signal
         self.learning_rate = learning_rate
 
@@ -73,7 +79,11 @@ class AffectiveCircuit:
 
     def _targets(self, state: AffectiveState | dict[str, float]) -> np.ndarray:
         values = state.as_dict() if isinstance(state, AffectiveState) else state
+        if any(name not in values for name in self.signal_names):
+            raise ValueError("affect targets are missing a circuit signal")
         targets = np.asarray([values[name] for name in self.signal_names], dtype=float)
+        if targets.shape != (len(self.signal_names),) or not np.isfinite(targets).all():
+            raise ValueError("affect targets must be finite scalars")
         targets[0] = (targets[0] + 1.0) / 2.0
         return np.clip(targets, 0.0, 1.0)
 
@@ -84,6 +94,7 @@ class AffectiveCircuit:
         features: np.ndarray,
     ) -> dict[str, float]:
         features = np.asarray(features, dtype=float)
+        self._validate_projection_inputs(synapses, edge_indices, features)
         weights = synapses.weight[edge_indices].mean(axis=2)
         probabilities = 1.0 / (1.0 + np.exp(-(weights @ features)))
         values = probabilities.copy()
@@ -100,6 +111,7 @@ class AffectiveCircuit:
         """Apply local feature/target alignment to input-to-affect synapses."""
 
         features = np.asarray(features, dtype=float)
+        self._validate_projection_inputs(synapses, edge_indices, features)
         weights = synapses.weight[edge_indices].mean(axis=2)
         probabilities = 1.0 / (1.0 + np.exp(-(weights @ features)))
         error = self._targets(state) - probabilities
@@ -107,9 +119,28 @@ class AffectiveCircuit:
         synapses.weight[edge_indices] += update[:, :, None] / self.neurons_per_signal
         synapses.weight[edge_indices] = np.clip(synapses.weight[edge_indices], -1.0, 1.0)
 
+    def _validate_projection_inputs(
+        self, synapses: SparseSynapses, edge_indices: np.ndarray, features: np.ndarray
+    ) -> None:
+        indices = np.asarray(edge_indices)
+        if indices.dtype.kind not in "iu":
+            raise ValueError("affect projection edge indices must be integers")
+        if indices.shape != (len(self.signal_names), features.size, self.neurons_per_signal):
+            raise ValueError("affect projection indices have the wrong shape")
+        if features.ndim != 1 or not np.isfinite(features).all():
+            raise ValueError("affect features must be a finite 1D array")
+        if np.any(indices < 0) or np.any(indices >= synapses.weight.size):
+            raise ValueError("affect projection edge index is out of bounds")
+
     def decode(self, spike_frames: list[np.ndarray], layout: PopulationLayout) -> dict[str, float]:
         if not spike_frames:
             return {name: 0.0 for name in self.signal_names}
+        for frame in spike_frames:
+            frame = np.asarray(frame)
+            if frame.shape != (layout.total_count,):
+                raise ValueError("affect spike frames must match the layout size")
+            if not np.isfinite(frame).all():
+                raise ValueError("affect spike frames must be finite")
         groups = self.groups(layout)
         rates = np.asarray(
             [

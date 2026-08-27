@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -89,11 +89,12 @@ class SparseSynapses:
     target: np.ndarray
     weight: np.ndarray
     neuron_count: int
+    _connectivity_frozen: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self.source = np.asarray(self.source, dtype=np.int64)
-        self.target = np.asarray(self.target, dtype=np.int64)
-        self.weight = np.asarray(self.weight, dtype=float)
+        self.source = np.array(self.source, dtype=np.int64, copy=True)
+        self.target = np.array(self.target, dtype=np.int64, copy=True)
+        self.weight = np.array(self.weight, dtype=float, copy=True)
         if not (self.source.shape == self.target.shape == self.weight.shape):
             raise ValueError("source, target, and weight must have equal shapes")
         if self.neuron_count <= 0:
@@ -102,6 +103,11 @@ class SparseSynapses:
             raise ValueError("source contains an invalid neuron index")
         if np.any(self.target < 0) or np.any(self.target >= self.neuron_count):
             raise ValueError("target contains an invalid neuron index")
+        if (
+            np.unique(np.stack((self.source, self.target), axis=1), axis=0).shape[0]
+            != self.source.size
+        ):
+            raise ValueError("duplicate directed synaptic edges are not allowed")
         np.clip(
             self.weight,
             -SYNAPTIC_WEIGHT_LIMIT,
@@ -154,9 +160,24 @@ class SparseSynapses:
         np.add.at(current, self.target[active_edges], self.weight[active_edges])
 
     def add_edges(self, source: np.ndarray, target: np.ndarray, weight: np.ndarray) -> None:
-        """Append connections, useful for explicit sensory projections."""
+        """Append connections atomically, useful for explicit projections."""
+
+        if self._connectivity_frozen:
+            raise RuntimeError("synaptic connectivity is immutable after network construction")
 
         extra = SparseSynapses(source, target, weight, self.neuron_count)
-        self.source = np.concatenate((self.source, extra.source))
-        self.target = np.concatenate((self.target, extra.target))
-        self.weight = np.concatenate((self.weight, extra.weight))
+        existing = np.stack((self.source, self.target), axis=1)
+        added = np.stack((extra.source, extra.target), axis=1)
+        if (
+            np.unique(np.concatenate((existing, added)), axis=0).shape[0]
+            != existing.shape[0] + added.shape[0]
+        ):
+            raise ValueError("duplicate directed synaptic edges are not allowed")
+        source = np.concatenate((self.source, extra.source))
+        target = np.concatenate((self.target, extra.target))
+        weight = np.concatenate((self.weight, extra.weight))
+        self.source, self.target, self.weight = source, target, weight
+
+    def freeze_connectivity(self) -> None:
+        """Prevent edge-count changes after edge-indexed runtime state exists."""
+        self._connectivity_frozen = True

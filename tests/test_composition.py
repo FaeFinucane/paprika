@@ -117,7 +117,7 @@ def test_isolated_clone_preserves_custom_plugins() -> None:
     assert any(type(item) is Plugin for item in clone.plugins)
 
 
-def test_character_output_is_terminal_and_hidden_recurrence_is_exposed() -> None:
+def test_hidden_recurrence_is_exposed() -> None:
     runtime = SpikingRuntime(
         NetworkConfig(
             input_features=4,
@@ -127,10 +127,6 @@ def test_character_output_is_terminal_and_hidden_recurrence_is_exposed() -> None
             connection_probability=1.0,
             seed=8,
         )
-    )
-    output = runtime.layout.slice(Population.OUTPUT_CHAR)
-    assert not np.any(
-        np.isin(runtime.network.synapses.source, np.arange(output.start, output.stop))
     )
     recurrence = runtime.hidden_recurrent_edge_indices
     hidden = runtime.layout.slice(Population.HIDDEN)

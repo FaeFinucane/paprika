@@ -38,6 +38,10 @@ class RewardModulatedSTDP:
         self.pre_trace = np.zeros(synapses.neuron_count)
         self.post_trace = np.zeros(synapses.neuron_count)
         self.eligibility = np.zeros(synapses.weight.size)
+        self.last_update = np.zeros(synapses.weight.size)
+        self.total_signed_update = 0.0
+        self.total_absolute_update = 0.0
+        self.total_clipped_update = 0.0
 
     def observe(self, spikes: np.ndarray) -> None:
         spikes = np.asarray(spikes, dtype=float)
@@ -68,11 +72,18 @@ class RewardModulatedSTDP:
             target_mask = np.zeros(self.synapses.neuron_count, dtype=bool)
             target_mask[np.asarray(target_neurons, dtype=int)] = True
             update = np.where(target_mask[self.synapses.target], update, 0.0)
-        self.synapses.weight[:] = np.clip(
-            self.synapses.weight + update,
+        before = self.synapses.weight.copy()
+        proposed = before + update
+        clipped = np.clip(
+            proposed,
             -self.weight_limit,
             self.weight_limit,
         )
+        self.synapses.weight[:] = clipped
+        self.last_update[:] = clipped - before
+        self.total_signed_update += float(self.last_update.sum())
+        self.total_absolute_update += float(np.abs(self.last_update).sum())
+        self.total_clipped_update += float(np.abs(proposed - clipped).sum())
 
     def reset_traces(self) -> None:
         self.pre_trace.fill(0.0)

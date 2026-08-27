@@ -24,6 +24,7 @@ from continual_agent.cognition.readout import Action, ActionReadout, Decision
 from continual_agent.cognition.working_memory import WorkingMemory
 from continual_agent.encoding.text_encoder import TextEncoder
 from continual_agent.environment.protocol import AgentAction
+from continual_agent.evaluation.reward import RewardLedger
 from continual_agent.language.spiking_decoder import SpikingCharacterDecoder
 
 if TYPE_CHECKING:
@@ -55,9 +56,11 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
                 connection_probability=self.config.connection_probability,
                 seed=self.config.seed,
                 session_policy=SessionPolicy(
-                    reset_neuron_state=not self.config.persistent_working_memory,
-                    reset_synaptic_activity=not self.config.persistent_working_memory,
-                    persist_working_memory=self.config.persistent_working_memory,
+                    reset_membrane=not self.config.persistent_working_memory,
+                    reset_refractory=not self.config.persistent_working_memory,
+                    reset_pending_current=not self.config.persistent_working_memory,
+                    reset_recurrent_activity=not self.config.persistent_working_memory,
+                    reset_working_memory=not self.config.persistent_working_memory,
                 ),
                 homeostasis_enabled=self.config.homeostasis_enabled,
                 homeostasis_target_rate=self.config.homeostasis_target_rate,
@@ -75,8 +78,7 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
         self.readout = ActionReadout(neurons_per_action=self.config.neurons_per_action)
         self.affect = AffectiveState()
         self.affect_circuit = AffectiveCircuit(neurons_per_signal=self.config.neurons_per_affect)
-        self.reward_baseline = 0.0
-        self.reward_ledger: list[AccountedEvent] = []
+        self.reward = RewardLedger()
         self.last_snapshot: DebugSnapshot | None = None
         self.last_execution_snapshot: SessionExecutionSnapshot | None = None
 
@@ -95,8 +97,7 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
             isolated.working_memory = deepcopy(self.working_memory)
             isolated.affect = deepcopy(self.affect)
             isolated.affect_circuit = deepcopy(self.affect_circuit)
-            isolated.reward_baseline = self.reward_baseline
-            isolated.reward_ledger = list(self.reward_ledger)
+            isolated.reward = deepcopy(self.reward)
             isolated.last_snapshot = None
 
         return self.runtime.execute_isolated(
@@ -136,20 +137,25 @@ class ConversationAgent(ResponseMixin, EventTrainingMixin):
     def apply_event_stream_reward(
         self, report: EventStreamReport, *, target_neurons: np.ndarray | None = None
     ) -> float:
-        self.reward_ledger.extend(report.records)
-        prediction_error = report.total_reward - self.reward_baseline
-        self.reward_baseline += 0.05 * prediction_error
+        prediction_error = self.reward.settle(report.records)
         self.runtime.plasticity.reinforce(
             prediction_error, self.affect.modulation(), target_neurons=target_neurons
         )
         self.runtime.plasticity.reset_traces()
         return prediction_error
 
+    @property
+    def reward_baseline(self) -> float:
+        return self.reward.baseline
+
+    @property
+    def reward_ledger(self) -> list[AccountedEvent]:
+        return self.reward.records
+
     def train_response(self, text: str, expected: Action) -> AgentAction:
         decision = self.respond(text)
         reward = 1.0 if decision.action == expected else -1.0
-        prediction_error = reward - self.reward_baseline
-        self.reward_baseline += 0.05 * prediction_error
+        prediction_error = self.reward.commit(reward)
         action_group = self.readout.groups(self.runtime.layout)[decision.action]
         self.runtime.plasticity.reinforce(
             prediction_error, self.affect.modulation(), target_neurons=action_group

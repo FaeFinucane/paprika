@@ -28,6 +28,7 @@ class NetworkCore:
             np.zeros(self.neurons.count, dtype=bool),
         )
         self._spike_buffer_index = 0
+        self.synapses.freeze_connectivity()
 
     @classmethod
     def random(
@@ -59,6 +60,8 @@ class NetworkCore:
         self.neurons.reset_state()
         self.pending_current.fill(0.0)
         self.tick = 0
+        for buffer in self._spike_buffers:
+            buffer.fill(False)
 
     def reset_synaptic_activity(self) -> None:
         self.pending_current.fill(0.0)
@@ -71,6 +74,8 @@ class NetworkCore:
             "voltage": self.neurons.voltage.copy(),
             "refractory": self.neurons.refractory.copy(),
             "pending_current": self.pending_current.copy(),
+            "spike_buffers": np.stack(self._spike_buffers).copy(),
+            "spike_buffer_index": self._spike_buffer_index,
             "tick": self.tick,
         }
 
@@ -81,9 +86,23 @@ class NetworkCore:
         expected = (self.neurons.count,)
         if voltage.shape != expected or refractory.shape != expected or pending.shape != expected:
             raise ValueError("network state arrays have the wrong shape")
+        if not np.isfinite(voltage).all() or not np.isfinite(pending).all():
+            raise ValueError("network state arrays must be finite")
+        if np.any(refractory < 0) or int(state["tick"]) < 0:
+            raise ValueError("network state counters must be non-negative")
         self.neurons.voltage[:] = voltage
         self.neurons.refractory[:] = refractory
         self.pending_current[:] = pending
+        buffers = np.asarray(
+            state.get("spike_buffers", np.zeros((2, self.neurons.count), dtype=bool)), dtype=bool
+        )
+        if buffers.shape != (2, self.neurons.count):
+            raise ValueError("network spike buffers have the wrong shape")
+        for target, source in zip(self._spike_buffers, buffers):
+            target[:] = source
+        self._spike_buffer_index = int(state.get("spike_buffer_index", 0))
+        if self._spike_buffer_index not in (0, 1):
+            raise ValueError("network spike buffer index must be 0 or 1")
         self.tick = int(state["tick"])
 
     def copy(self) -> "NetworkCore":
@@ -108,4 +127,7 @@ class NetworkCore:
         copied.neurons.voltage[:] = self.neurons.voltage
         copied.neurons.refractory[:] = self.neurons.refractory
         copied.pending_current[:] = self.pending_current
+        for target, source in zip(copied._spike_buffers, self._spike_buffers):
+            target[:] = source
+        copied._spike_buffer_index = self._spike_buffer_index
         return copied

@@ -25,6 +25,9 @@ def test_population_metrics_define_activity_fractions_and_distributions() -> Non
     assert result["saturated_fraction"] == 0.5
     assert result["voltage_min"] == 0.2
     assert result["voltage_max"] == 0.5
+    assert result["mean_firing_rate"] == result["firing_rate_mean"]
+    assert result["firing_rate_std"] == result["firing_rate_spread"]
+    assert result["voltage_integral"] == 1.4
     assert result["threshold_mean"] == 1.0
     metrics.record_output_event()
     assert metrics.output_event_rate == 0.5

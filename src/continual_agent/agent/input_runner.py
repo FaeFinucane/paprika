@@ -231,14 +231,21 @@ class InputRunner:
     def _reset(self) -> None:
         runtime = self.runtime
         policy = runtime.response_session.policy
-        if policy.reset_neuron_state and policy.reset_synaptic_activity:
-            runtime.network.reset_state()
-        elif policy.reset_neuron_state:
+        if policy.reset_membrane or policy.reset_refractory:
             runtime.network.reset_neuron_state()
-        elif policy.reset_synaptic_activity:
+        if policy.reset_pending_current or policy.reset_recurrent_activity:
             runtime.network.reset_synaptic_activity()
-        if not policy.persist_plasticity_eligibility:
+        if policy.reset_eligibility:
             runtime.plasticity.reset_traces()
+        if policy.reset_background_rng:
+            runtime.background_drive.reset_rng()
+        if (
+            policy.reset_membrane
+            or policy.reset_refractory
+            or policy.reset_pending_current
+            or policy.reset_recurrent_activity
+        ):
+            runtime.network.tick = 0
         runtime.output_readout.reset()
         runtime.apply_ablation_mask()
         runtime.response_session = ResponseSession(policy=runtime.response_session.policy)

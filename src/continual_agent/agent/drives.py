@@ -49,6 +49,7 @@ class BackgroundDrive:
         self.rate = rate
         self.current = current
         self.rng = np.random.default_rng(seed)
+        self._initial_rng_state = self.rng.bit_generator.state
         self._sample = np.zeros(size, dtype=float)
         self._random = np.zeros(size, dtype=float)
 
@@ -67,9 +68,17 @@ class BackgroundDrive:
         }
 
     def restore_state(self, snapshot: dict[str, object]) -> None:
-        self.rate = float(snapshot["rate"])  # type: ignore[arg-type]
-        self.current = float(snapshot["current"])  # type: ignore[arg-type]
+        rate = float(snapshot["rate"])  # type: ignore[arg-type]
+        current = float(snapshot["current"])  # type: ignore[arg-type]
+        if not np.isfinite(rate) or not 0 <= rate <= 1 or not np.isfinite(current) or current < 0:
+            raise ValueError("invalid background drive state")
+        self.rate = rate
+        self.current = current
         self.rng.bit_generator.state = snapshot["rng_state"]  # type: ignore[assignment]
+
+    def reset_rng(self) -> None:
+        """Return stochastic sampling to the configured stream origin."""
+        self.rng.bit_generator.state = self._initial_rng_state
 
 
 class HomeostasisDrive:

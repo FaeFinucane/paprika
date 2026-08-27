@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from time import perf_counter
 
 import numpy as np
 
@@ -31,10 +30,28 @@ class PopulationDiagnostics:
     voltage_spread: float
     voltage_min: float
     voltage_max: float
+    signed_spike_rate: float
+    integrated_voltage: float
     threshold_mean: float
     threshold_spread: float
     threshold_min: float
     threshold_max: float
+
+    @property
+    def mean_firing_rate(self) -> float:
+        return self.firing_rate_mean
+
+    @property
+    def firing_rate_std(self) -> float:
+        return self.firing_rate_spread
+
+    @property
+    def signed_voltage_activity(self) -> float:
+        return self.signed_spike_rate
+
+    @property
+    def voltage_integral(self) -> float:
+        return self.integrated_voltage
 
     def as_dict(self) -> dict[str, float]:
         return {
@@ -42,6 +59,8 @@ class PopulationDiagnostics:
             "spike_count": self.spike_count,
             "firing_rate_mean": self.firing_rate_mean,
             "firing_rate_spread": self.firing_rate_spread,
+            "mean_firing_rate": self.firing_rate_mean,
+            "firing_rate_std": self.firing_rate_spread,
             "active_fraction": self.active_fraction,
             "silent_fraction": self.silent_fraction,
             "saturated_fraction": self.saturated_fraction,
@@ -49,6 +68,10 @@ class PopulationDiagnostics:
             "voltage_spread": self.voltage_spread,
             "voltage_min": self.voltage_min,
             "voltage_max": self.voltage_max,
+            "signed_spike_rate": self.signed_spike_rate,
+            "integrated_voltage": self.integrated_voltage,
+            "signed_voltage_activity": self.signed_spike_rate,
+            "voltage_integral": self.integrated_voltage,
             "threshold_mean": self.threshold_mean,
             "threshold_spread": self.threshold_spread,
             "threshold_min": self.threshold_min,
@@ -76,8 +99,7 @@ class RuntimeMetrics:
         self.voltage_minimum = np.full(self.layout.total_count, np.inf)
         self.voltage_maximum = np.full(self.layout.total_count, -np.inf)
 
-    def record(self, spikes: np.ndarray, voltage: np.ndarray) -> None:
-        started = perf_counter()
+    def record(self, spikes: np.ndarray, voltage: np.ndarray, elapsed_seconds: float = 0.0) -> None:
         spikes = np.asarray(spikes, dtype=float)
         voltage = np.asarray(voltage, dtype=float)
         if spikes.shape != (self.layout.total_count,) or voltage.shape != spikes.shape:
@@ -88,7 +110,7 @@ class RuntimeMetrics:
         self.voltage_square_sum += voltage * voltage
         self.voltage_minimum = np.minimum(self.voltage_minimum, voltage)
         self.voltage_maximum = np.maximum(self.voltage_maximum, voltage)
-        self.elapsed_seconds += perf_counter() - started
+        self.elapsed_seconds += max(0.0, float(elapsed_seconds))
 
     @property
     def ticks_per_second(self) -> float:
@@ -128,6 +150,13 @@ class RuntimeMetrics:
             float(np.sqrt(voltage_variance.mean())) if rates.size else 0.0,
             float(self.voltage_minimum[indices].min()) if rates.size and observed else 0.0,
             float(self.voltage_maximum[indices].max()) if rates.size and observed else 0.0,
+            # Spikes are unsigned, so expose their direction using the
+            # observed membrane-potential sign rather than pretending that
+            # a boolean spike vector carries polarity.
+            float((self.spikes[indices] * np.sign(voltage_mean)).sum() / ticks)
+            if rates.size
+            else 0.0,
+            float(self.voltage_sum[indices].sum()),
             float(thresholds.mean()) if rates.size else 0.0,
             float(thresholds.std()) if rates.size else 0.0,
             float(thresholds.min()) if rates.size else 0.0,

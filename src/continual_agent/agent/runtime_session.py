@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from copy import copy, deepcopy
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import TYPE_CHECKING, Callable, TypeVar, cast
 
 import numpy as np
 
 from continual_agent.agent.drives import ArrayDrive, DriveAggregator, HomeostasisDrive
+from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.plugins import (
     HomeostasisPlugin,
     MetricsPlugin,
     NetworkContext,
+    NetworkPlugin,
     PlasticityPlugin,
 )
 from continual_agent.agent.population_homeostasis import PopulationHomeostasis
@@ -49,8 +51,19 @@ class RuntimeSession:
             np.asarray(state["voltage"]),
             np.asarray(state["refractory"]),
             np.asarray(state["pending_current"]),
-            affect=affect,
-            working_memory=working_memory,
+            pending_current=np.asarray(state["pending_current"]),
+            plasticity_pre_trace=self.runtime.plasticity.pre_trace,
+            plasticity_post_trace=self.runtime.plasticity.post_trace,
+            affect=(
+                getattr(affect, "snapshot")()
+                if affect is not None and hasattr(affect, "snapshot")
+                else None
+            ),
+            working_memory=(
+                getattr(working_memory, "snapshot")()
+                if working_memory is not None and hasattr(working_memory, "snapshot")
+                else None
+            ),
             plasticity_eligibility=self.runtime.plasticity.eligibility,
         )
 
@@ -59,18 +72,30 @@ class RuntimeSession:
             "network": self.runtime.network.state_snapshot(),
             "weights": self.runtime.network.synapses.weight.copy(),
             "eligibility": self.runtime.plasticity.eligibility.copy(),
+            "pre_trace": self.runtime.plasticity.pre_trace.copy(),
+            "post_trace": self.runtime.plasticity.post_trace.copy(),
             "background_drive": self.runtime.background_drive.state_snapshot(),
+            "response_session": deepcopy(self.runtime.response_session),
         }
 
     def restore_reproducibility_snapshot(self, snapshot: dict[str, object]) -> None:
         network = snapshot["network"]
         assert isinstance(network, dict)
         self.runtime.network.restore_state(network)
-        self.runtime.network.synapses.weight[:] = snapshot["weights"]
-        self.runtime.plasticity.eligibility[:] = snapshot["eligibility"]
+        self.runtime.network.synapses.weight[:] = np.asarray(snapshot["weights"])
+        self.runtime.plasticity.eligibility[:] = np.asarray(snapshot["eligibility"])
+        self.runtime.plasticity.pre_trace[:] = np.asarray(
+            snapshot.get("pre_trace", np.zeros_like(self.runtime.plasticity.pre_trace))
+        )
+        self.runtime.plasticity.post_trace[:] = np.asarray(
+            snapshot.get("post_trace", np.zeros_like(self.runtime.plasticity.post_trace))
+        )
         drive = snapshot["background_drive"]
         assert isinstance(drive, dict)
         self.runtime.background_drive.restore_state(drive)
+        response_session = snapshot.get("response_session")
+        if response_session is not None:
+            self.runtime.response_session = cast(ResponseSession, deepcopy(response_session))
         self.runtime.apply_ablation_mask()
 
     def start(self, *, affect: object | None = None, working_memory: object | None = None) -> None:
@@ -84,16 +109,30 @@ class RuntimeSession:
         elif session.state is SessionState.RESPONDING:
             session.abort()
         policy = session.policy
-        if policy.reset_neuron_state and policy.reset_synaptic_activity:
-            self.runtime.network.reset_state()
-        elif policy.reset_neuron_state:
-            self.runtime.network.reset_neuron_state()
-        elif policy.reset_synaptic_activity:
+        if policy.reset_membrane:
+            self.runtime.network.neurons.voltage.fill(
+                self.runtime.network.neurons.resting_potential
+            )
+        if policy.reset_refractory:
+            self.runtime.network.neurons.refractory.fill(0)
+        if policy.reset_pending_current or policy.reset_recurrent_activity:
             self.runtime.network.reset_synaptic_activity()
-        if not policy.persist_plasticity_eligibility:
+        if policy.reset_eligibility:
             self.runtime.plasticity.reset_traces()
+        if policy.reset_background_rng:
+            self.runtime.background_drive.reset_rng()
+        if policy.reset_affect and affect is not None and hasattr(affect, "reset"):
+            getattr(affect, "reset")()
+        if (
+            policy.reset_working_memory
+            and working_memory is not None
+            and hasattr(working_memory, "reset")
+        ):
+            getattr(working_memory, "reset")()
         if policy.reset_readout:
             self.runtime.output_readout.reset()
+        if policy.reset_membrane or policy.reset_refractory or policy.reset_pending_current:
+            self.runtime.network.tick = 0
         session.begin(self.snapshot(affect, working_memory))
 
     def finish(
@@ -168,7 +207,7 @@ class RuntimeSession:
         isolated.metrics.voltage_square_sum = source.metrics.voltage_square_sum.copy()
         isolated.metrics.voltage_minimum = source.metrics.voltage_minimum.copy()
         isolated.metrics.voltage_maximum = source.metrics.voltage_maximum.copy()
-        copied_plugins: list[object] = []
+        copied_plugins: list[NetworkPlugin] = []
         for plugin in source.plugins:
             if isinstance(plugin, MetricsPlugin):
                 copied_plugins.append(MetricsPlugin(isolated.metrics))
@@ -197,5 +236,5 @@ class RuntimeSession:
         if extension_hook is not None:
             extension_hook(source, isolated)
         isolated.session = RuntimeSession(isolated)
-        isolated.trainer = None
+        isolated.trainer = InputRunner(isolated)
         return isolated

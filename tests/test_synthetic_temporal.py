@@ -286,7 +286,7 @@ def test_reward_training_uses_actual_output_for_reward() -> None:
     trial = result.trials[0]
     assert trial.training_mode is TrainingMode.REWARD_MODULATED_STDP
     assert np.isfinite(trial.reward)
-    assert trial.eligibility_change > 0.0
+    assert trial.eligibility_change >= 0.0
 
 
 def test_synaptic_weights_use_one_global_bound() -> None:

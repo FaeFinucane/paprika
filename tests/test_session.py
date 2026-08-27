@@ -42,9 +42,7 @@ def test_session_enforces_response_lifecycle() -> None:
 
 def test_session_snapshot_isolated_and_contains_initial_synaptic_activity() -> None:
     initial = snapshot()
-    session = ResponseSession(
-        policy=SessionPolicy(reset_neuron_state=True, reset_synaptic_activity=True)
-    )
+    session = ResponseSession(policy=SessionPolicy(reset_membrane=True, reset_pending_current=True))
     session.begin(initial)
 
     initial.neuron_voltage[0] = 99.0
@@ -55,8 +53,8 @@ def test_session_snapshot_isolated_and_contains_initial_synaptic_activity() -> N
     assert second is not None
     assert second.neuron_voltage[0] == 0.2
     assert second.synaptic_activity[0] == 0.5
-    assert session.policy.reset_neuron_state
-    assert session.policy.reset_synaptic_activity
+    assert session.policy.reset_membrane
+    assert session.policy.reset_pending_current
 
 
 def test_object_snapshot_payloads_are_isolated() -> None:

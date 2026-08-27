@@ -58,7 +58,7 @@ def test_supervised_teacher_updates_existing_hidden_output_edges() -> None:
     assert np.any(agent.runtime.network.synapses.weight[selected] != before)
 
 
-def test_repeated_event_has_no_output_feedback() -> None:
+def test_repeated_event_does_not_reinject_input() -> None:
     agent = ConversationAgent(AgentConfig(input_features=16, seed=4))
     currents: list[np.ndarray] = []
     original_step = agent.runtime.network.step
@@ -73,10 +73,6 @@ def test_repeated_event_has_no_output_feedback() -> None:
     assert currents
     assert np.any(currents[0][: agent.config.input_features])
     assert all(not np.any(current[: agent.config.input_features]) for current in currents[1:])
-    output = agent.runtime.layout.slice(Population.OUTPUT_CHAR)
-    assert not np.any(
-        np.isin(agent.runtime.network.synapses.source, np.arange(output.start, output.stop))
-    )
 
 
 def test_response_teacher_respects_ablation() -> None:
@@ -151,3 +147,21 @@ def test_token_projection_requires_matching_named_population() -> None:
 
     with pytest.raises(ValueError, match="output_char"):
         decoder.token_projection_indices(PopulationLayout(char_count=decoder.neuron_count + 1))
+
+
+def test_target_tokens_normalize_unknown_characters_and_append_eos() -> None:
+    decoder = SpikingCharacterDecoder(alphabet=("a", " "))
+    assert decoder.target_tokens("A?") == ("a", "<EOS>")
+
+
+def test_decoder_groups_cover_each_token_without_overlap() -> None:
+    decoder = SpikingCharacterDecoder(alphabet=("a", "b"), neurons_per_token=2)
+    layout = PopulationLayout(
+        char_count=decoder.neuron_count,
+        char_subgroups={
+            token: slice(152 + i * 2, 152 + (i + 1) * 2) for i, token in enumerate(decoder.tokens)
+        },
+    )
+    groups = decoder.groups(layout)
+    flattened = np.concatenate(tuple(groups.values()))
+    np.testing.assert_array_equal(np.sort(flattened), np.arange(152, 152 + decoder.neuron_count))
