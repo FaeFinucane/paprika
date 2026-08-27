@@ -57,6 +57,13 @@ or injecting an output event. The actual observed stream still determines
 reward. Missing output remains neutral in the `early` schedule, so the learner
 gets time to discover useful events before harsher penalties are introduced.
 
+Direct input→character and hidden→character edges begin with a shared,
+label-independent excitatory distribution (`0.50 ± 0.05` by default), selected
+by `TemporalExperimentConfig.weight_initialization` and applied by the factory.
+This is
+an output-capacity bootstrap, not target seeding; all character groups receive
+the same distribution and all weights remain within the global `[-1, 1]` bound.
+
 Comparisons can opt into population regulation with
 `TemporalExperimentConfig(homeostasis_enabled=True)` and its target, strength,
 update interval, and current-bound settings. Each trial retains complete

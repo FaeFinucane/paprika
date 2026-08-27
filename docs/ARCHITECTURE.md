@@ -23,7 +23,9 @@ The default configuration has 188 neurons:
 | `OUTPUT_CHAR` | 12 x 3 = 36 | EOS plus the configured character alphabet | `src/continual_agent/language/spiking_decoder.py` |
 
 `AgentConfig` controls these dimensions. `NetworkFactory` owns layout,
-projection, neuron, synapse, drive, plugin, and readout construction. It
+neuron, synapse, drive, plugin, and readout construction; the dedicated
+`WeightInitializer` owns validated weight distributions, bootstrap contacts,
+and stable named RNG streams. It
 returns one coherent network bundle to `SpikingRuntime`, the canonical
 composition root. `SpikingRuntime` owns only composition, the efficient tick
 loop, and small current/ablation/diagnostic accessors. `RuntimeSession` owns
@@ -78,6 +80,10 @@ network is not reset between character events in a response.
   `[-1.0, 1.0]`, enforced when edges are constructed and by learning updates.
   Strong bootstrap projections use `1.0`; current magnitude, rather than an
   out-of-range weight, supplies their drive.
+- `src/continual_agent/simulation/weight_initialization.py` defines the
+  `WeightInitializationConfig` contract. Every construction stream is named,
+  and synthetic experiments select their direct/hidden output distributions in
+  `TemporalExperimentConfig` before factory construction.
 - `src/continual_agent/cognition/working_memory.py` provides the optional
   host-side feature context controlled by `persistent_working_memory`; it is
   not a learned language-state population.

@@ -56,6 +56,12 @@ cleanup decisions are intentionally not listed as active tasks.
   encoded external spike trains and spike-delivered teaching signals for
   ordinary network interactions. Do not add a second core or bypass the LIF
   dynamics without an explicit source-population design.
+- Move weight initialization behind a dedicated validated configuration/object
+  (for example `weight_initialization.py`) owned by the network construction
+  path. Keep experiment-specific choices in `TemporalExperimentConfig`, pass
+  them into `NetworkFactory`, and remove synthetic post-build weight mutation.
+  Preserve deterministic named RNG streams, the global weight bound, and tests
+  for label-symmetric output seeding and reproducibility.
 - Use the existing sparse weight-delta/session snapshots to distinguish
   short-term neural-state learning from synaptic consolidation, including
   pathway-specific eligibility and weight changes.

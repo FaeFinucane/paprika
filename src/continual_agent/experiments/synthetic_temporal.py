@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Iterable, Sequence
 
@@ -18,6 +18,7 @@ from continual_agent.evaluation.event_stream import (
     evaluate_event_stream,
 )
 from continual_agent.simulation.population_layout import Population
+from continual_agent.simulation.weight_initialization import WeightInitializationConfig
 
 
 class CopyCondition(str, Enum):
@@ -58,6 +59,14 @@ class TemporalExperimentConfig:
     response_ticks: int = 64
     hidden_neurons: int = 12
     seed: int = 0
+    weight_initialization: WeightInitializationConfig = field(
+        default_factory=lambda: WeightInitializationConfig(
+            direct_output_mean=0.5,
+            direct_output_spread=0.05,
+            hidden_output_mean=0.5,
+            hidden_output_spread=0.05,
+        )
+    )
     background_rate: float = 0.01
     background_current: float = 0.3
     stdp_background_rate: float = 0.05
@@ -209,6 +218,7 @@ def _make_runtime(
         output_tokens=("<EOS>", *config.alphabet),
         neurons_per_token=2,
         seed=seed,
+        weight_initialization=config.weight_initialization,
         background_rate=background_rate,
         background_current=background_current,
         homeostasis_enabled=config.homeostasis_enabled,

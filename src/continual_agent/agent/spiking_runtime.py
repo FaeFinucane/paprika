@@ -18,6 +18,7 @@ from continual_agent.agent.session import (
 )
 from continual_agent.cognition.readout import OutputEvent
 from continual_agent.simulation.population_layout import Population
+from continual_agent.simulation.weight_initialization import WeightInitializationConfig
 
 T = TypeVar("T")
 
@@ -64,6 +65,7 @@ class SpikingRuntime:
         neurons_per_affect: int = 1,
         connection_probability: float = 0.08,
         seed: int = 0,
+        weight_initialization: WeightInitializationConfig | None = None,
         learning_rate: float = 0.08,
         background_rate: float = 0.0,
         background_current: float = 0.05,
@@ -86,6 +88,7 @@ class SpikingRuntime:
             neurons_per_affect=neurons_per_affect,
             connection_probability=connection_probability,
             seed=seed,
+            weight_initialization=weight_initialization,
             learning_rate=learning_rate,
             background_rate=background_rate,
             background_current=background_current,

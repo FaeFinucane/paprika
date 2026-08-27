@@ -28,7 +28,10 @@ from continual_agent.plasticity.stdp import RewardModulatedSTDP
 from continual_agent.simulation.core import NetworkCore
 from continual_agent.simulation.neurons import LIFNeurons
 from continual_agent.simulation.population_layout import Population, PopulationLayout
-from continual_agent.simulation.synapses import SparseSynapses
+from continual_agent.simulation.weight_initialization import (
+    WeightInitializationConfig,
+    WeightInitializer,
+)
 
 
 @dataclass
@@ -111,15 +114,11 @@ class NetworkFactory:
         )
         neurons = LIFNeurons(total, dt=1.0, tau_membrane=5.0, threshold=1.0, refractory_ticks=2)
         seed = cast(int, o["seed"])
-        rng = np.random.default_rng(seed)
-        synapses = SparseSynapses.random(
-            total,
-            cast(float, o["connection_probability"]),
-            rng,
-            excitatory_weight=0.18,
-            inhibitory_weight=-0.12,
-            inhibitory_fraction=0.15,
+        initializer = WeightInitializer(
+            seed, cast(WeightInitializationConfig | None, o.get("weight_initialization"))
         )
+        c = initializer.config
+        synapses = initializer.random_synapses(total, cast(float, o["connection_probability"]))
         initial_edges = synapses.weight.size
         hidden_groups = tuple(
             np.asarray(g, dtype=np.int64)
@@ -129,20 +128,26 @@ class NetworkFactory:
             # Use three unit-weight contacts instead of one out-of-range
             # weight. This preserves the intended bootstrap drive while every
             # individual synapse obeys the global bound.
-            for _ in range(3):
-                self._projection(synapses, rng, np.array([source]), group, 1.0, 0.0)
+            initializer.bootstrap_input_hidden(
+                synapses, np.array([source]), group, f"input_hidden_bootstrap_{source}"
+            )
         input_hidden = np.arange(initial_edges, synapses.weight.size)
-        self._projection(
-            synapses, rng, np.arange(input_features), np.arange(action_start, char_start), 0.9, 0.08
+        initializer.projection(
+            synapses,
+            "input_action",
+            np.arange(input_features),
+            np.arange(action_start, char_start),
+            c.input_action_mean,
+            c.input_action_spread,
         )
         affect_edges = synapses.weight.size
-        self._projection(
+        initializer.projection(
             synapses,
-            rng,
+            "input_affect",
             np.arange(input_features),
             np.arange(affect_start, action_start),
-            0.0,
-            0.02,
+            c.input_affect_mean,
+            c.input_affect_spread,
         )
         affect_indices = (
             np.arange(affect_edges, synapses.weight.size)
@@ -150,18 +155,23 @@ class NetworkFactory:
             .transpose(1, 0, 2)
         )
         affect_action_edges = synapses.weight.size
-        self._projection(
+        initializer.projection(
             synapses,
-            rng,
+            "affect_action",
             np.arange(affect_start, action_start),
             np.arange(action_start, char_start),
-            0.0,
-            0.02,
+            c.affect_action_mean,
+            c.affect_action_spread,
         )
         affect_action_indices = np.arange(affect_action_edges, synapses.weight.size)
         token_edges = synapses.weight.size
-        self._projection(
-            synapses, rng, np.arange(char_start), np.arange(char_start, total), 0.0, 0.025
+        initializer.projection(
+            synapses,
+            "recurrent_output",
+            np.arange(char_start),
+            np.arange(char_start, total),
+            c.recurrent_output_mean,
+            c.recurrent_output_spread,
         )
         projection = self._projection_indices
         direct = (
@@ -172,6 +182,20 @@ class NetworkFactory:
             + projection(input_features + hidden_neurons, len(output_tokens), neurons_per_token)[
                 input_features : input_features + hidden_neurons
             ].ravel()
+        )
+        synapses.weight[direct] = np.clip(
+            initializer.rng("direct_output").normal(
+                c.direct_output_mean, c.direct_output_spread, direct.size
+            ),
+            -1.0,
+            1.0,
+        )
+        synapses.weight[hidden] = np.clip(
+            initializer.rng("hidden_output").normal(
+                c.hidden_output_mean, c.hidden_output_spread, hidden.size
+            ),
+            -1.0,
+            1.0,
         )
         network = NetworkCore(neurons, synapses)
         metrics = RuntimeMetrics(layout)
@@ -188,7 +212,10 @@ class NetworkFactory:
         drives = DriveAggregator(total)
         drives.add(external)
         background = BackgroundDrive(
-            total, cast(float, o["background_rate"]), cast(float, o["background_current"]), seed + 1
+            total,
+            cast(float, o["background_rate"]),
+            cast(float, o["background_current"]),
+            initializer.seed_for("background"),
         )
         drives.add(background)
         drives.add(HomeostasisDrive(homeostasis))
@@ -224,20 +251,6 @@ class NetworkFactory:
             hidden,
             direct.reshape(input_features, len(output_tokens), neurons_per_token),
             np.flatnonzero((synapses.source >= input_features) & (synapses.target >= char_start)),
-        )
-
-    @staticmethod
-    def _projection(
-        synapses: SparseSynapses,
-        rng: np.random.Generator,
-        sources: np.ndarray,
-        targets: np.ndarray,
-        mean: float,
-        spread: float,
-    ) -> None:
-        source = np.repeat(sources, targets.size)
-        synapses.add_edges(
-            source, np.tile(targets, sources.size), rng.normal(mean, spread, source.size)
         )
 
     @staticmethod
