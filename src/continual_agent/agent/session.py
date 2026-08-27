@@ -60,10 +60,6 @@ INPUT_END_CHANNEL = 1
 BOUNDARY_CHANNEL_COUNT = 2
 
 
-class SnapshotState:
-    """Protocol-like runtime state contract used by session snapshots."""
-
-
 @dataclass(frozen=True)
 class SessionPolicy:
     """Reset/persistence decisions at a response boundary.

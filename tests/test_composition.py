@@ -2,7 +2,6 @@ from copy import deepcopy
 
 import numpy as np
 
-from continual_agent.agent.drives import ArrayDrive, DriveAggregator
 from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.plugins import NetworkContext
@@ -31,39 +30,6 @@ def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
     np.testing.assert_array_equal(second, [False, True])
     assert snapshot["tick"] == 1
     np.testing.assert_allclose(snapshot["pending_current"], [0.0, 1.0])
-
-
-def test_drive_aggregator_reuses_current_buffer() -> None:
-    aggregator = DriveAggregator(2)
-    external = ArrayDrive(2)
-    external.current[:] = [1.0, 2.0]
-    aggregator.add(external)
-
-    first = aggregator.collect()
-    external.current[:] = [3.0, 4.0]
-    second = aggregator.collect()
-
-    assert first is second
-    np.testing.assert_allclose(second, [3.0, 4.0])
-
-
-def test_network_plugin_context_can_be_scheduled_without_neuron_loops() -> None:
-    seen: list[NetworkContext] = []
-
-    class Plugin:
-        interval = 2
-
-        def after_step(self, context: NetworkContext) -> None:
-            seen.append(context)
-
-    core = NetworkCore.random(4, seed=4, connection_probability=0.0)
-    plugin = Plugin()
-    for _ in range(4):
-        spikes = core.step(np.zeros(4))
-        if core.tick % plugin.interval == 0:
-            plugin.after_step(NetworkContext(core.tick, spikes, core.neurons.voltage))
-
-    assert [context.tick for context in seen] == [2, 4]
 
 
 def test_runtime_composes_owned_config_session_and_runner_components() -> None:

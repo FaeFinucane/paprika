@@ -1,7 +1,7 @@
 import numpy as np
 
 from continual_agent.agent.network_config import NetworkConfig
-from continual_agent.agent.population_homeostasis import PopulationHomeostasis
+from continual_agent.agent.population_homeostasis import HomeostasisConfig, PopulationHomeostasis
 from continual_agent.agent.runtime_metrics import RuntimeMetrics
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.simulation.population_layout import Population, PopulationLayout
@@ -25,9 +25,7 @@ def test_population_metrics_define_activity_fractions_and_distributions() -> Non
     assert result["saturated_fraction"] == 0.5
     assert result["voltage_min"] == 0.2
     assert result["voltage_max"] == 0.5
-    assert result["mean_firing_rate"] == result["firing_rate_mean"]
-    assert result["firing_rate_std"] == result["firing_rate_spread"]
-    assert result["voltage_integral"] == 1.4
+    assert result["integrated_voltage"] == 1.4
     assert result["threshold_mean"] == 1.0
     metrics.record_output_event()
     assert metrics.output_event_rate == 0.5
@@ -38,7 +36,10 @@ def test_homeostasis_moves_toward_target_and_is_bounded() -> None:
         input_count=0, hidden_count=2, affect_count=0, action_count=0, char_count=0
     )
     controller = PopulationHomeostasis(
-        layout, enabled=True, target_rate=0.25, strength=1.0, update_interval=1, max_current=0.2
+        layout,
+        HomeostasisConfig(
+            enabled=True, target_rate=0.25, strength=1.0, update_interval=1, max_current=0.2
+        ),
     )
     controller.observe(np.array([0.0, 0.0]))
     assert controller.drive[0] == 0.2
@@ -58,8 +59,7 @@ def test_homeostasis_does_not_change_stdp_specialization() -> None:
             output_tokens=("<EOS>", "A"),
             neurons_per_token=1,
             seed=7,
-            homeostasis_enabled=True,
-            homeostasis_update_interval=1,
+            homeostasis=HomeostasisConfig(enabled=True, update_interval=1),
         )
     )
     before = runtime.network.synapses.weight.copy()
@@ -80,8 +80,7 @@ def test_enabled_homeostasis_is_deterministic_for_a_seed() -> None:
                 seed=11,
                 background_rate=0.5,
                 background_current=0.4,
-                homeostasis_enabled=True,
-                homeostasis_update_interval=2,
+                homeostasis=HomeostasisConfig(enabled=True, update_interval=2),
             )
         )
 

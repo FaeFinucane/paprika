@@ -51,7 +51,7 @@ class ResponseMixin:
         )
 
     def _current_session_snapshot(self: _ResponseHost) -> SessionSnapshot:
-        return self.runtime._snapshot(self.affect, self.working_memory)
+        return self.runtime.session.snapshot(self.affect, self.working_memory)
 
     def _finish_response(self: _ResponseHost, *, exhausted: bool) -> None:
         snapshot = self._current_session_snapshot()

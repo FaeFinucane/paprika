@@ -35,9 +35,6 @@ class MetricsPlugin:
     def after_step(self, context: NetworkContext) -> None:
         self.metrics.record(context.spikes, context.voltage, context.elapsed_seconds)
 
-    def record_output_event(self) -> None:
-        self.metrics.record_output_event()
-
 
 class HomeostasisPlugin:
     def __init__(self, homeostasis: PopulationHomeostasis) -> None:

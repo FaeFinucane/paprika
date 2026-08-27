@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Callable, TypeVar, cast
 
 import numpy as np
 
-from continual_agent.agent.drives import ArrayDrive, DriveAggregator, HomeostasisDrive
+from continual_agent.agent.drives import ArrayDrive
 from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.plugins import (
     HomeostasisPlugin,
@@ -183,22 +183,14 @@ class RuntimeSession:
         isolated.edge_enabled = source.edge_enabled.copy()
         isolated.background_drive = deepcopy(source.background_drive)
         isolated.external_drive = ArrayDrive(source.network.neurons.count)
-        isolated.drives = DriveAggregator(source.network.neurons.count)
-        isolated.drives.add(isolated.external_drive)
-        isolated.drives.add(isolated.background_drive)
         isolated.homeostasis = PopulationHomeostasis(
             source.layout,
-            enabled=source.homeostasis.enabled,
-            target_rate=source.homeostasis.target_rate,
-            strength=source.homeostasis.strength,
-            update_interval=source.homeostasis.update_interval,
-            max_current=source.homeostasis.max_current,
-            populations=source.homeostasis.populations,
+            source.homeostasis.config,
         )
         isolated.homeostasis.drive = source.homeostasis.drive.copy()
         isolated.homeostasis._ticks = source.homeostasis._ticks
         isolated.homeostasis._spikes = source.homeostasis._spikes.copy()
-        isolated.drives.add(HomeostasisDrive(isolated.homeostasis))
+        isolated.drives = (isolated.external_drive, isolated.background_drive, isolated.homeostasis)
         isolated.metrics = RuntimeMetrics(source.layout, source.metrics.saturation_rate)
         isolated.metrics.ticks = source.metrics.ticks
         isolated.metrics.output_events = source.metrics.output_events

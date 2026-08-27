@@ -143,11 +143,13 @@ with at least one or zero spikes in the window, and saturated counts rates at or
 above 0.5 by default. Voltage and threshold summaries are distributions, while
 weight and eligibility norms are available by output pathway.
 
-Population homeostasis is opt-in through `homeostasis_enabled` and its target,
-strength, interval, bound, and population settings on `AgentConfig` or
-`TemporalExperimentConfig`. It adds a bounded shared current after each slow
-window. The default is disabled; no individual firing-rate targets, adaptive
-thresholds, output feedback, gate, or timer mechanism is involved.
+Population homeostasis is opt-in through a `HomeostasisConfig` supplied as
+`NetworkConfig.homeostasis`; the conversational adapter passes
+`AgentConfig.homeostasis` through to that network configuration. The config
+owns the target, strength, interval, current bound, and population settings.
+It adds a bounded shared current after each slow window. The default is
+disabled; no individual firing-rate targets, adaptive thresholds, output
+feedback, gate, or timer mechanism is involved.
 
 ## Current boundary
 

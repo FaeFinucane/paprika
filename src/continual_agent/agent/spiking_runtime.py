@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable
 from threading import RLock
 from time import perf_counter
 from typing import TypeVar
 
 import numpy as np
 
-from continual_agent.agent.drives import ArrayDrive, BackgroundDrive, DriveAggregator
+from continual_agent.agent.drives import ArrayDrive, BackgroundDrive
 from continual_agent.agent.input_runner import InputRunner
 from continual_agent.agent.network_config import NetworkConfig
 from continual_agent.agent.plugins import MetricsPlugin, NetworkContext, NetworkPlugin
@@ -44,7 +44,7 @@ class SpikingRuntime:
     homeostasis: PopulationHomeostasis
     external_drive: ArrayDrive
     background_drive: BackgroundDrive
-    drives: DriveAggregator
+    drives: tuple[ArrayDrive, BackgroundDrive, PopulationHomeostasis]
     plugins: list[NetworkPlugin]
     _context: NetworkContext
     input_features: int
@@ -74,7 +74,10 @@ class SpikingRuntime:
         if current.shape != (self.network.neurons.count,):
             raise ValueError(f"current must have shape ({self.network.neurons.count},)")
         self.external_drive.current[:] = current
-        emitted = self.network.step(self.drives.collect())
+        current_buffer = np.zeros_like(current)
+        for drive in self.drives:
+            drive.add_to(current_buffer)
+        emitted = self.network.step(current_buffer)
         self._context.tick = self.network.tick
         self._context.spikes = emitted
         self._context.voltage = self.network.neurons.voltage
@@ -85,10 +88,6 @@ class SpikingRuntime:
                 plugin.after_step(self._context)
         self.apply_ablation_mask()
         return emitted
-
-    @property
-    def network_state(self) -> Mapping[str, object]:
-        return self.network.state_snapshot()
 
     def reproducibility_snapshot(self) -> dict[str, object]:
         return self.session.reproducibility_snapshot()
@@ -144,7 +143,7 @@ class SpikingRuntime:
 
     def record_output_event(self, event: OutputEvent | None) -> None:
         if event is not None:
-            self.metrics_plugin.record_output_event()
+            self.metrics.record_output_event()
 
     def current(
         self, frame: np.ndarray, context: np.ndarray | None = None, *, tonic_affect: bool = False
@@ -180,9 +179,6 @@ class SpikingRuntime:
     ) -> None:
         self.session.finish(exhausted=exhausted, affect=affect, working_memory=working_memory)
 
-    def _snapshot(self, affect: object | None = None, working_memory: object | None = None):
-        return self.session.snapshot(affect, working_memory)
-
     def execute_isolated(
         self,
         operation: Callable[[SpikingRuntime], T],
@@ -197,7 +193,7 @@ class SpikingRuntime:
 
     def train_input_events(
         self,
-        events: Iterable[InputSignal | tuple[np.ndarray, str]],
+        events: Iterable[InputSignal | np.ndarray | tuple[np.ndarray, str]],
         *,
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> None:
@@ -205,7 +201,7 @@ class SpikingRuntime:
 
     def train_delayed_copy_baseline(
         self,
-        events: Iterable[InputSignal | tuple[np.ndarray, str]],
+        events: Iterable[InputSignal | np.ndarray | tuple[np.ndarray, str]],
         *,
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
     ) -> None:

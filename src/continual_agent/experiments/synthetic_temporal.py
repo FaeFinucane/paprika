@@ -74,11 +74,6 @@ class TemporalExperimentConfig:
     stdp_background_rate: float = 0.05
     stdp_background_current: float = 0.5
     reward_stage: str = "early"
-    homeostasis_enabled: bool = False
-    homeostasis_target_rate: float = 0.1
-    homeostasis_strength: float = 0.01
-    homeostasis_update_interval: int = 100
-    homeostasis_max_current: float = 0.25
     replicates: int = 1
 
     def __post_init__(self) -> None:
@@ -217,6 +212,19 @@ def _supervised_labels(
     return labelled
 
 
+def _training_stream(
+    config: TemporalExperimentConfig, sequence: tuple[str, ...]
+) -> list[InputSignal | np.ndarray | tuple[np.ndarray, str]]:
+    events, labelled = _stream(config, sequence)
+    labels = {id(frame): target for frame, target in labelled}
+    return [
+        (event, labels[id(event)])
+        if isinstance(event, np.ndarray) and id(event) in labels
+        else event
+        for event in events
+    ]
+
+
 def _make_runtime(
     config: TemporalExperimentConfig, seed: int, *, stdp_background: bool = False
 ) -> SpikingRuntime:
@@ -234,11 +242,6 @@ def _make_runtime(
             weight_initialization=config.weight_initialization,
             background_rate=background_rate,
             background_current=background_current,
-            homeostasis_enabled=config.homeostasis_enabled,
-            homeostasis_target_rate=config.homeostasis_target_rate,
-            homeostasis_strength=config.homeostasis_strength,
-            homeostasis_update_interval=config.homeostasis_update_interval,
-            homeostasis_max_current=config.homeostasis_max_current,
         ),
     )
     agent.network.neurons.tau_membrane = 3.0
@@ -248,7 +251,7 @@ def _make_runtime(
 
 def _train(
     agent: SpikingRuntime,
-    input_events: list[InputSignal | np.ndarray],
+    input_events: list[InputSignal | np.ndarray | tuple[np.ndarray, str]],
     labelled: list[tuple[np.ndarray, str]],
     kind: AgentKind,
     mode: TrainingMode,
@@ -267,21 +270,16 @@ def _train(
         patience_window=config.patience_window
     )
     for _ in range(trials):
-        events: list[InputSignal | tuple[np.ndarray, str]] = [
-            InputSignal.INPUT_BEGIN,
-            *labelled,
-            InputSignal.INPUT_END,
-        ]
         if kind is AgentKind.SUPERVISED:
             if condition is CopyCondition.DELAYED:
-                agent.train_delayed_copy_baseline(events)
+                agent.train_delayed_copy_baseline(input_events)
             else:
-                agent.train_input_events(events)
+                agent.train_input_events(input_events)
         else:
             before_weights = agent.network.synapses.weight.copy()
 
             observed = agent.run_input_events(
-                input_events,
+                [item[0] if isinstance(item, tuple) else item for item in input_events],
                 response_ticks=config.response_ticks,
                 observe_during_input=condition is CopyCondition.IMMEDIATE,
             )
@@ -385,7 +383,7 @@ def run_temporal_experiment(
                             reward, eligibility_change, pathway_change, pathway_eligibility = (
                                 _train(
                                     agent,
-                                    events,
+                                    _training_stream(config, sequence),
                                     training_target,
                                     kind,
                                     mode,

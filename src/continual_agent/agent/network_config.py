@@ -7,12 +7,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from continual_agent.agent.drives import (
-    ArrayDrive,
-    BackgroundDrive,
-    DriveAggregator,
-    HomeostasisDrive,
-)
+from continual_agent.agent.drives import ArrayDrive, BackgroundDrive
 from continual_agent.agent.plugins import (
     HomeostasisPlugin,
     MetricsPlugin,
@@ -20,7 +15,7 @@ from continual_agent.agent.plugins import (
     NetworkPlugin,
     PlasticityPlugin,
 )
-from continual_agent.agent.population_homeostasis import PopulationHomeostasis
+from continual_agent.agent.population_homeostasis import HomeostasisConfig, PopulationHomeostasis
 from continual_agent.agent.runtime_metrics import RuntimeMetrics
 from continual_agent.agent.session import BOUNDARY_CHANNEL_COUNT, ResponseSession, SessionPolicy
 from continual_agent.cognition.readout import EventReadout
@@ -50,7 +45,7 @@ class NetworkBundle:
     homeostasis: PopulationHomeostasis
     external_drive: ArrayDrive
     background_drive: BackgroundDrive
-    drives: DriveAggregator
+    drives: tuple[ArrayDrive, BackgroundDrive, PopulationHomeostasis]
     plugins: list[NetworkPlugin]
     metrics_plugin: MetricsPlugin
     context: NetworkContext
@@ -83,12 +78,7 @@ class NetworkConfig:
     background_rate: float = 0.0
     background_current: float = 0.05
     session_policy: SessionPolicy = field(default_factory=SessionPolicy)
-    homeostasis_enabled: bool = False
-    homeostasis_target_rate: float = 0.1
-    homeostasis_strength: float = 0.01
-    homeostasis_update_interval: int = 100
-    homeostasis_max_current: float = 0.25
-    homeostasis_populations: tuple[Population, ...] = (Population.HIDDEN,)
+    homeostasis: HomeostasisConfig = field(default_factory=HomeostasisConfig)
 
     def __post_init__(self) -> None:
         integer_fields = (
@@ -97,7 +87,6 @@ class NetworkConfig:
             "neurons_per_token",
             "neurons_per_action",
             "neurons_per_affect",
-            "homeostasis_update_interval",
         )
         for name in integer_fields:
             value = getattr(self, name)
@@ -105,7 +94,7 @@ class NetworkConfig:
                 raise ValueError(f"{name} must be a positive integer")
         if not isinstance(self.output_tokens, tuple):
             raise ValueError("output_tokens must be a tuple")
-        for name in ("action_names", "affect_names", "homeostasis_populations"):
+        for name in ("action_names", "affect_names"):
             if not isinstance(getattr(self, name), tuple):
                 raise ValueError(f"{name} must be a tuple")
         if not isinstance(self.session_policy, SessionPolicy):
@@ -139,9 +128,6 @@ class NetworkConfig:
             "learning_rate",
             "background_rate",
             "background_current",
-            "homeostasis_target_rate",
-            "homeostasis_strength",
-            "homeostasis_max_current",
         )
         for name in numeric_fields:
             value = getattr(self, name)
@@ -155,17 +141,10 @@ class NetworkConfig:
             raise ValueError("connection_probability must be in [0, 1]")
         if not 0 <= self.background_rate <= 1 or self.background_current < 0:
             raise ValueError("background rate must be in [0, 1] and current must be non-negative")
-        if (
-            self.learning_rate < 0
-            or self.homeostasis_target_rate < 0
-            or self.homeostasis_strength < 0
-            or self.homeostasis_max_current < 0
-        ):
-            raise ValueError("rate, strength, and current values must be non-negative")
-        if any(
-            not isinstance(population, Population) for population in self.homeostasis_populations
-        ):
-            raise ValueError("homeostasis_populations must contain Population values")
+        if self.learning_rate < 0:
+            raise ValueError("learning_rate must be non-negative")
+        if not isinstance(self.homeostasis, HomeostasisConfig):
+            raise ValueError("homeostasis must be a HomeostasisConfig")
 
     def build(self) -> NetworkBundle:
         input_features = self.input_features
@@ -306,16 +285,24 @@ class NetworkConfig:
                     targets,
                     f"population_projection_{index}_{contact}",
                 )
-        initializer.projection(
-            synapses,
+
+        def projection(
+            name: str,
+            sources: np.ndarray,
+            targets: np.ndarray,
+            mean: float,
+            spread: float,
+        ) -> np.ndarray:
+            return initializer.projection(synapses, name, sources, targets, mean, spread)
+
+        projection(
             "input_action",
             np.arange(input_features),
             np.arange(action_start, char_start),
             c.input_action_mean,
             c.input_action_spread,
         )
-        affect_edges = initializer.projection(
-            synapses,
+        affect_edges = projection(
             "input_affect",
             np.arange(input_features),
             np.arange(affect_start, action_start),
@@ -326,8 +313,7 @@ class NetworkConfig:
             input_features, len(affect_names), neurons_per_affect
         ).transpose(1, 0, 2)
         affect_action_edges = synapses.weight.size
-        initializer.projection(
-            synapses,
+        projection(
             "affect_action",
             np.arange(affect_start, action_start),
             np.arange(action_start, char_start),
@@ -335,24 +321,21 @@ class NetworkConfig:
             c.affect_action_spread,
         )
         affect_action_indices = np.arange(affect_action_edges, synapses.weight.size)
-        initializer.projection(
-            synapses,
+        projection(
             "recurrent_output",
             np.arange(char_start, total),
             np.arange(char_start, total),
             c.recurrent_output_mean,
             c.recurrent_output_spread,
         )
-        direct = initializer.projection(
-            synapses,
+        direct = projection(
             "direct_output",
             np.arange(input_features),
             np.arange(char_start, total),
             c.direct_output_mean,
             c.direct_output_spread,
         )
-        hidden = initializer.projection(
-            synapses,
+        hidden = projection(
             "hidden_output",
             np.arange(input_features, affect_start),
             np.arange(char_start, total),
@@ -363,24 +346,16 @@ class NetworkConfig:
         metrics = RuntimeMetrics(layout)
         homeostasis = PopulationHomeostasis(
             layout,
-            enabled=self.homeostasis_enabled,
-            target_rate=self.homeostasis_target_rate,
-            strength=self.homeostasis_strength,
-            update_interval=self.homeostasis_update_interval,
-            max_current=self.homeostasis_max_current,
-            populations=self.homeostasis_populations,
+            self.homeostasis,
         )
         external = ArrayDrive(total)
-        drives = DriveAggregator(total)
-        drives.add(external)
         background = BackgroundDrive(
             total,
             self.background_rate,
             self.background_current,
             initializer.seed_for("background"),
         )
-        drives.add(background)
-        drives.add(HomeostasisDrive(homeostasis))
+        drives = (external, background, homeostasis)
         plasticity = RewardModulatedSTDP(synapses, learning_rate=self.learning_rate)
         metrics_plugin = MetricsPlugin(metrics)
         plugins: list[NetworkPlugin] = [

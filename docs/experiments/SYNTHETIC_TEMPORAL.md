@@ -69,11 +69,11 @@ This is
 an output-capacity bootstrap, not target seeding; all character groups receive
 the same distribution and all weights remain within the global `[-1, 1]` bound.
 
-Comparisons can opt into population regulation with
-`TemporalExperimentConfig(homeostasis_enabled=True)` and its target, strength,
-update interval, and current-bound settings. Each trial retains complete
-per-population diagnostics; regulation is deliberately slow and shared so it
-does not erase pathway specialization. The default experiment leaves it off.
+Population regulation is configured with a `HomeostasisConfig` supplied as
+`NetworkConfig.homeostasis`; it is not a direct `TemporalExperimentConfig`
+option. Each trial retains complete per-population diagnostics; regulation is
+deliberately slow and shared so it does not erase pathway specialization. The
+default experiment leaves it off.
 
 ## Tests
 

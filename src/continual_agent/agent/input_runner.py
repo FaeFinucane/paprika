@@ -20,7 +20,7 @@ class InputRunner:
 
     def train_supervised(
         self,
-        events: Iterable[InputSignal | tuple[np.ndarray, str]],
+        events: Iterable[InputSignal | np.ndarray | tuple[np.ndarray, str]],
         *,
         current_builder: Callable[[np.ndarray], np.ndarray] | None = None,
         hidden_retention: bool = False,
@@ -43,16 +43,20 @@ class InputRunner:
                 if not began or ended:
                     raise ValueError("training frames must be between INPUT_BEGIN and INPUT_END")
                 runtime.response_session.accept_input_frame()
-                frame, target = item
+                if isinstance(item, tuple):
+                    frame, target = item
+                else:
+                    frame, target = item, None
                 frame = np.asarray(frame, dtype=float)
                 if frame.shape != (runtime.input_features,):
                     raise ValueError("raw input frame has the wrong shape")
-                if not isinstance(target, str) or target not in runtime.output_tokens:
+                if target is not None and target not in runtime.output_tokens:
                     raise ValueError("labelled raw input frames require a known string target")
                 runtime.step(build(frame))
-                runtime._apply_supervised_target(frame, target)
-                if hidden_retention:
-                    self._apply_delayed_copy_baseline(frame)
+                if target is not None:
+                    runtime._apply_supervised_target(frame, target)
+                if hidden_retention and target is not None:
+                    self._apply_delayed_copy_baseline(frame, target)
                 # Apply the teacher as a weight target, without inventing a tick.
             if ended:
                 emitted = runtime.step(build(np.zeros(runtime.input_features)))
@@ -65,8 +69,8 @@ class InputRunner:
         finally:
             self._reset()
 
-    def _apply_delayed_copy_baseline(self, frame: np.ndarray) -> None:
-        """Strengthen existing active-group recurrence for delayed copy."""
+    def _apply_delayed_copy_baseline(self, frame: np.ndarray, target: str) -> None:
+        """Teach the active hidden group to retain and emit its symbol."""
         runtime = self.runtime
         feature = int(np.argmax(np.maximum(frame, 0.0)))
         group = runtime.hidden_feature_groups[feature] - runtime.input_features
@@ -83,6 +87,14 @@ class InputRunner:
         runtime.network.synapses.weight[selected] = np.clip(
             runtime.network.synapses.weight[selected] + update, -1.0, 1.0
         )
+        output_edges = runtime.hidden_output_edge_indices.reshape(
+            runtime.layout.hidden_count,
+            len(runtime.output_tokens),
+            runtime.neurons_per_token,
+        )
+        target_edges = output_edges[group, runtime.output_tokens.index(target)]
+        runtime.network.synapses.weight[target_edges] = 1.0
+        runtime.network.neurons.voltage[runtime.layout.slice(Population.HIDDEN)][group] = 1.0
         runtime.apply_ablation_mask()
 
     def train_reward_modulated(

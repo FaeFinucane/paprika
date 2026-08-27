@@ -13,23 +13,6 @@ class Drive(Protocol):
     def add_to(self, output: np.ndarray) -> None: ...
 
 
-class DriveAggregator:
-    """Combine registered drives into one preallocated current buffer."""
-
-    def __init__(self, neuron_count: int) -> None:
-        self.buffer = np.zeros(neuron_count, dtype=float)
-        self.drives: list[Drive] = []
-
-    def add(self, drive: Drive) -> None:
-        self.drives.append(drive)
-
-    def collect(self) -> np.ndarray:
-        self.buffer.fill(0.0)
-        for drive in self.drives:
-            drive.add_to(self.buffer)
-        return self.buffer
-
-
 class ArrayDrive:
     """A mutable array drive, useful for task adapters and tests."""
 
@@ -79,11 +62,3 @@ class BackgroundDrive:
     def reset_rng(self) -> None:
         """Return stochastic sampling to the configured stream origin."""
         self.rng.bit_generator.state = self._initial_rng_state
-
-
-class HomeostasisDrive:
-    def __init__(self, homeostasis: object) -> None:
-        self.homeostasis = homeostasis
-
-    def add_to(self, output: np.ndarray) -> None:
-        self.homeostasis.current_into(output)  # type: ignore[attr-defined]

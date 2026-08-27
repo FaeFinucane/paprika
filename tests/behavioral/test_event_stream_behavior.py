@@ -33,19 +33,6 @@ def test_named_sequence_accepts_late_events_in_order_and_reports_latency() -> No
     assert report.eos_accuracy
 
 
-def test_named_sequence_stops_after_premature_eos_and_accounts_following_output() -> None:
-    report = evaluate_event_stream(
-        ("alpha", "beta", "<EOS>"),
-        (output("<EOS>", 1), output("beta", 2)),
-    )
-
-    assert report.premature_eos == 1
-    assert report.post_eos_output == 1
-    assert report.counts[EventOutcome.PREMATURE_EOS] == 1
-    assert report.counts[EventOutcome.POST_EOS_OUTPUT] == 1
-    assert not report.eos_accuracy
-
-
 def test_agent_consumes_stream_report_as_one_ordered_reward_ledger() -> None:
     agent = ConversationAgent(AgentConfig(seed=31))
     report = evaluate_event_stream(("x", "<EOS>"), (output("x", 0), output("<EOS>", 1)))

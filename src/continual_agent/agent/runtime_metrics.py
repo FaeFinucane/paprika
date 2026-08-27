@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 import numpy as np
 
@@ -37,46 +37,8 @@ class PopulationDiagnostics:
     threshold_min: float
     threshold_max: float
 
-    @property
-    def mean_firing_rate(self) -> float:
-        return self.firing_rate_mean
-
-    @property
-    def firing_rate_std(self) -> float:
-        return self.firing_rate_spread
-
-    @property
-    def signed_voltage_activity(self) -> float:
-        return self.signed_spike_rate
-
-    @property
-    def voltage_integral(self) -> float:
-        return self.integrated_voltage
-
     def as_dict(self) -> dict[str, float]:
-        return {
-            "neuron_count": self.neuron_count,
-            "spike_count": self.spike_count,
-            "firing_rate_mean": self.firing_rate_mean,
-            "firing_rate_spread": self.firing_rate_spread,
-            "mean_firing_rate": self.firing_rate_mean,
-            "firing_rate_std": self.firing_rate_spread,
-            "active_fraction": self.active_fraction,
-            "silent_fraction": self.silent_fraction,
-            "saturated_fraction": self.saturated_fraction,
-            "voltage_mean": self.voltage_mean,
-            "voltage_spread": self.voltage_spread,
-            "voltage_min": self.voltage_min,
-            "voltage_max": self.voltage_max,
-            "signed_spike_rate": self.signed_spike_rate,
-            "integrated_voltage": self.integrated_voltage,
-            "signed_voltage_activity": self.signed_spike_rate,
-            "voltage_integral": self.integrated_voltage,
-            "threshold_mean": self.threshold_mean,
-            "threshold_spread": self.threshold_spread,
-            "threshold_min": self.threshold_min,
-            "threshold_max": self.threshold_max,
-        }
+        return asdict(self)
 
 
 class RuntimeMetrics:
@@ -111,10 +73,6 @@ class RuntimeMetrics:
         self.voltage_minimum = np.minimum(self.voltage_minimum, voltage)
         self.voltage_maximum = np.maximum(self.voltage_maximum, voltage)
         self.elapsed_seconds += max(0.0, float(elapsed_seconds))
-
-    @property
-    def ticks_per_second(self) -> float:
-        return float(self.ticks / self.elapsed_seconds) if self.elapsed_seconds else 0.0
 
     def record_output_event(self) -> None:
         self.output_events += 1
