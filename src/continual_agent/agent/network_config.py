@@ -158,6 +158,21 @@ class NetworkConfig:
                 synapses, np.array([source]), group, f"input_hidden_bootstrap_{source}"
             )
         input_hidden = np.arange(initial_edges, synapses.weight.size)
+        for index, seed in enumerate(c.population_projections):
+            if seed.source is Population.OUTPUT_CHAR:
+                raise ValueError("OUTPUT_CHAR cannot be a projection source")
+            source_bounds = layout.slice(seed.source)
+            target_bounds = layout.slice(seed.target)
+            sources = np.arange(source_bounds.start, source_bounds.stop)
+            targets = np.arange(target_bounds.start, target_bounds.stop)
+            for contact in range(seed.contacts):
+                initializer.population_projection(
+                    synapses,
+                    seed,
+                    sources,
+                    targets,
+                    f"population_projection_{index}_{contact}",
+                )
         initializer.projection(
             synapses,
             "input_action",

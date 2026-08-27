@@ -3,6 +3,23 @@
 This file contains deferred or actionable work. Implemented phases and historical
 cleanup decisions are intentionally not listed as active tasks.
 
+## Priority: biologically honest projection seeding
+
+- Replace the current feature-partitioned input→hidden bootstrap and dense
+  hidden-group recurrence with a shared sparse projection model. Each source
+  neuron should sample an overlapping target subset controlled by an expected
+  `fan` value; A and B must not be forced into disjoint hidden subsets.
+- Use a bounded bimodal weight distribution with a strong positive mode and a
+  weaker negative mode, exposing inhibitory fraction and both mode
+  distributions in `WeightInitializationConfig`.
+- Use the same projection style for INPUT→HIDDEN and HIDDEN→HIDDEN while
+  allowing separate fan/distribution settings. Avoid duplicate contacts and
+  preserve deterministic named RNG streams.
+- Replace supervised delayed-copy assumptions about fixed hidden feature groups
+  with activity-derived temporary hidden assemblies. Measure whether the
+  resulting overlapping recurrent network can retain symbols before using it
+  as an STDP substrate.
+
 ## Output protocol
 
 - Add and evaluate a separate `OUTPUT_FEEDBACK` channel only after the event
@@ -17,86 +34,16 @@ cleanup decisions are intentionally not listed as active tasks.
 
 ## Learning and stability
 
-- Completed: the shared runtime has seeded, vectorized low-rate background drive;
-  normal output projections remain present and only explicit ablations zero edges.
-  Runtime and synthetic results expose hidden/output activity, event rate, and
-  eligibility/weight changes by pathway.
-- Completed: synthetic STDP uses actual immediate and causal delayed outputs,
-  preserves eligibility until the scalar event reward, and has an explicit early
-  versus reliable asymmetric reward schedule. Penalties remain event-level and
-  are not output-volume scaled.
-- Completed: `SpikingRuntime.population_diagnostics` reports per-population rate
-  mean/spread, active/silent/saturated fractions, voltage and threshold
-  distributions, and output event rate. `pathway_diagnostics` reports weight
-  and eligibility norms for direct, hidden, and recurrent output pathways.
-- Completed: optional slow population homeostasis adds one bounded shared current
-  per configured population. It targets a population mean rate, is disabled by
-  default, and does not adapt individual neurons, thresholds, output feedback,
-  gates, timer neurons, or STDP weights.
-- Future research only: investigate whether heterogeneous intrinsic oscillatory
-  or pacemaker-like activity is useful for temporal coordination. Do not add
-  timer neurons or timer-driven activity to the current baseline experiments;
-  begin with stochastic background drive instead.
-- Measure recurrent-state persistence and capacity, and decide whether a
-  dedicated learned context population is justified. Do not infer this from
-  longer examples alone.
-- Compare stateful-lifetime evaluation (continuing membrane, refractory,
-  pending-current, and recurrent state) with explicit cold-start evaluation;
-  report training and evaluation metric windows separately.
 - Sweep the synthetic membrane time constant explicitly (including a more
   brain-like candidate around `tau=10` ticks) together with frame spacing and
   response duration; `tau=3` is a historical responsiveness heuristic, not a
   calibrated biological parameter.
-- Measure and tune output projection initialization/fan-in separately from
-  hidden bootstrap connectivity. Character output edges currently start near
-  zero while input-to-hidden contacts are deliberately strong, so output
-  spike generation is a distinct capacity bottleneck.
-- Define a spike-native runtime boundary for sensory and teacher interactions:
-  preserve current injection for physical/noise/homeostatic drives, but prefer
-  encoded external spike trains and spike-delivered teaching signals for
-  ordinary network interactions. Do not add a second core or bypass the LIF
-  dynamics without an explicit source-population design.
-- Move weight initialization behind a dedicated validated configuration/object
-  (for example `weight_initialization.py`) owned by the network construction
-  path. Keep experiment-specific choices in `TemporalExperimentConfig`, pass
-  them into `NetworkConfig`, and remove synthetic post-build weight mutation.
-  Preserve deterministic named RNG streams, the global weight bound, and tests
-  for label-symmetric output seeding and reproducibility.
-- Use the existing sparse weight-delta/session snapshots to distinguish
-  short-term neural-state learning from synaptic consolidation, including
-  pathway-specific eligibility and weight changes.
 - Add stronger dedicated event-stream tests for `ma`, `ba`, `mama`, `baba`,
   repeated characters, valid silence, premature EOS, missing EOS, and post-EOS
   suppression.
-
-- Retain `experiments/run_conversation.py` only as an explicitly named typed
-  action baseline. If it is not an active comparison, remove it too rather
-  than keeping an undocumented second experiment path.
-
-## Scaling
-
-- Increase network size only after event-stream behavior and activity/capacity
-  measurements demonstrate a genuine bottleneck.
-
-## Codebase structure and quality
-
-Completed: `conversation_agent.py` is now a thin public facade; configuration,
-response lifecycle/output, and event training live in focused modules. Runtime
-network/session state has one owner, and failed raw-event streams clean up their
-transient state. Ruff and mypy are configured in `pyproject.toml`; pytest,
-Ruff, mypy, and the synthetic experiment are the documented verification set.
-
-Architectural requirements are enforced by the production APIs and tests:
-population layout owns addressing, and `EventReadout` owns event output.
-Formatting and import/lint rules are style gates supplied by Ruff.
-
-## Safety and resources
-
-- Keep resource budgeting separate from affect. Wire `AffectiveState.energy`
-  into computation limits only when an explicit budget policy exists.
-- Design a separate normative/safety layer with explicit constraints and
-  transparent objectives; do not add a single morality scalar or claim a
-  normative veto before it is implemented.
+- Compare stateful-lifetime evaluation (continuing membrane, refractory,
+  pending-current, and recurrent state) with explicit cold-start evaluation;
+  report training and evaluation metric windows separately.
 
 See [architecture](ARCHITECTURE.md) and [training](TRAINING.md) for the current
 implemented boundary.

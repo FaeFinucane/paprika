@@ -11,6 +11,10 @@ from continual_agent.agent.session import InputSignal
 from continual_agent.agent.spiking_runtime import SpikingRuntime
 from continual_agent.simulation import LIFNeurons, NetworkCore, SparseSynapses
 from continual_agent.simulation.population_layout import Population
+from continual_agent.simulation.weight_initialization import (
+    PopulationProjectionSeed,
+    WeightInitializationConfig,
+)
 
 
 def test_network_core_preserves_one_tick_synaptic_delay_and_snapshots() -> None:
@@ -112,6 +116,35 @@ def test_character_output_is_terminal_and_hidden_recurrence_is_exposed() -> None
     )
     assert np.all(
         np.isin(runtime.network.synapses.target[recurrence], np.arange(hidden.start, hidden.stop))
+    )
+
+
+def test_population_projection_seed_is_reproducible_bounded_and_dense() -> None:
+    weights = WeightInitializationConfig(
+        population_projections=(
+            PopulationProjectionSeed(Population.HIDDEN, Population.HIDDEN, 0.4),
+        )
+    )
+    config = NetworkConfig(
+        4, 4, ("<EOS>",), 1, connection_probability=0.0, seed=21, weight_initialization=weights
+    )
+    first = SpikingRuntime(config)
+    second = SpikingRuntime(config)
+    first_edges = first.hidden_recurrent_edge_indices
+    second_edges = second.hidden_recurrent_edge_indices
+    np.testing.assert_array_equal(
+        first.network.synapses.source[first_edges], second.network.synapses.source[second_edges]
+    )
+    np.testing.assert_array_equal(
+        first.network.synapses.target[first_edges], second.network.synapses.target[second_edges]
+    )
+    np.testing.assert_array_equal(
+        first.network.synapses.weight[first_edges], second.network.synapses.weight[second_edges]
+    )
+    assert first_edges.size == 12
+    assert np.all(
+        (first.network.synapses.weight[first_edges] >= -1.0)
+        & (first.network.synapses.weight[first_edges] <= 1.0)
     )
 
 

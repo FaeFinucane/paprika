@@ -7,7 +7,38 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from continual_agent.simulation.population_layout import Population
 from continual_agent.simulation.synapses import SparseSynapses
+
+
+@dataclass(frozen=True)
+class PopulationProjectionSeed:
+    """A reproducible, bounded seed for a population-to-population projection."""
+
+    source: Population
+    target: Population
+    mean: float
+    spread: float = 0.0
+    contacts: int = 1
+    allow_self_edges: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.source, Population) or not isinstance(self.target, Population):
+            raise ValueError("source and target must be Population values")
+        if (
+            not isinstance(self.contacts, int)
+            or isinstance(self.contacts, bool)
+            or self.contacts <= 0
+        ):
+            raise ValueError("contacts must be a positive integer")
+        if not np.isfinite(self.mean) or abs(self.mean) > 1.0:
+            raise ValueError("mean must be finite and within [-1, 1]")
+        if not np.isfinite(self.spread) or self.spread < 0.0:
+            raise ValueError("spread must be finite and non-negative")
+        if abs(self.mean) + self.spread > 1.0:
+            raise ValueError("projection distribution must fit within [-1, 1]")
+        if not isinstance(self.allow_self_edges, bool):
+            raise ValueError("allow_self_edges must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -32,6 +63,9 @@ class WeightInitializationConfig:
     direct_output_spread: float = 0.025
     hidden_output_mean: float = 0.0
     hidden_output_spread: float = 0.025
+    population_projections: tuple[PopulationProjectionSeed, ...] = (
+        PopulationProjectionSeed(Population.HIDDEN, Population.HIDDEN, 0.08),
+    )
 
     def __post_init__(self) -> None:
         if self.input_hidden_contacts <= 0:
@@ -76,6 +110,10 @@ class WeightInitializationConfig:
         ):
             if abs(mean) + spread > 1.0:
                 raise ValueError("weight distributions must fit within [-1, 1]")
+        if not isinstance(self.population_projections, tuple) or any(
+            not isinstance(seed, PopulationProjectionSeed) for seed in self.population_projections
+        ):
+            raise ValueError("population_projections must contain PopulationProjectionSeed values")
 
 
 class WeightInitializer:
@@ -120,6 +158,26 @@ class WeightInitializer:
         weights = self.rng(name).normal(mean, spread, source.size)
         start = synapses.weight.size
         synapses.add_edges(source, np.tile(targets, sources.size), weights)
+        return np.arange(start, synapses.weight.size)
+
+    def population_projection(
+        self,
+        synapses: SparseSynapses,
+        seed: PopulationProjectionSeed,
+        sources: np.ndarray,
+        targets: np.ndarray,
+        name: str,
+    ) -> np.ndarray:
+        """Append a seeded Cartesian projection, optionally excluding self edges."""
+        source = np.repeat(sources, targets.size)
+        target = np.tile(targets, sources.size)
+        if not seed.allow_self_edges:
+            keep = source != target
+            source = source[keep]
+            target = target[keep]
+        weights = self.rng(name).normal(seed.mean, seed.spread, source.size)
+        start = synapses.weight.size
+        synapses.add_edges(source, target, weights)
         return np.arange(start, synapses.weight.size)
 
     def bootstrap_input_hidden(

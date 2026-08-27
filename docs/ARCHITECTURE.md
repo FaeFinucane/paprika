@@ -24,8 +24,8 @@ The default configuration has 188 neurons:
 
 `AgentConfig` controls these dimensions. `NetworkConfig` owns construction fields and layout,
 neuron, synapse, drive, plugin, and readout construction; the dedicated
-`WeightInitializer` owns validated weight distributions, bootstrap contacts,
-and stable named RNG streams. It
+`WeightInitializer` owns validated weight distributions, population projection
+seeds, bootstrap contacts, and stable named RNG streams. It
 returns one coherent network bundle to `SpikingRuntime`, the canonical
 composition root. `SpikingRuntime` owns only composition, the efficient tick
 loop, and small current/ablation/diagnostic accessors. `RuntimeSession` owns
@@ -52,8 +52,14 @@ duplicated offsets.
   outgoing edges, including base-random edges, and output reafference is
   deferred. The hidden region is recurrent space, not a separate language
   module.
-- `hidden_recurrent_edge_indices` is the explicit HIDDEN->HIDDEN pathway used
-  by recurrent diagnostics, ablation, and delayed-copy retention training.
+- `WeightInitializationConfig.population_projections` describes generic seeded
+  population-to-population projections. The default includes a dense positive
+  HIDDEN->HIDDEN recurrence, with bounded weights and deterministic named RNG
+  streams. `hidden_recurrent_edge_indices` includes these edges and any valid
+  random HIDDEN->HIDDEN edges, and is used by recurrent diagnostics, ablation,
+  and delayed-copy retention training. The current supervised delayed baseline
+  uses same-feature-group recurrence; replacing that fixed grouping with
+  activity-derived assemblies remains an open task.
   `hidden_output_edge_indices` is a separate teacher/readout pathway.
 - `EventReadout` observes spike frames from action or character populations.
   Named subgroup spike counts form candidates, with one spike sufficient by
@@ -118,10 +124,11 @@ structural rewiring, individual adaptive thresholds, and network scaling are
 deferred. Homeostasis is opt-in and population-level only, so its defaults do
 not alter existing behavior.
 
-The character path supports teacher-presented ordered events through hidden
-state and existing HIDDEN->HIDDEN recurrence, including EOS, but this should
-not be described as full sequence learning. Stronger dedicated tests for exact
-learned strings and repeated characters remain needed.
+The character path has teacher-presented ordered-event training through hidden
+state and HIDDEN->HIDDEN recurrence, including EOS, but delayed-copy behavior
+is not yet reliable and this should not be described as full sequence learning.
+Stronger dedicated tests for exact learned strings and repeated characters
+remain needed.
 
 See [training](TRAINING.md), [tasks](TASKS.md), and the
 [affective-state reference](AFFECTIVE_STATE_SPEC.md).

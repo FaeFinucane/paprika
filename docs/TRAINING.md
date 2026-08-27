@@ -121,8 +121,8 @@ thresholds, output feedback, gate, or timer mechanism is involved.
 
 Raw-frame training is an explicit session: exactly one `INPUT_BEGIN` and
 `INPUT_END` are required, every frame must be inside that window, and cleanup
-resets traces, neural state, readout state, and the training lifecycle even when
-the iterator or validation fails. The canonical character training operation
+resets readout and lifecycle state while neural state and traces follow the
+configured `SessionPolicy`, even when the iterator or validation fails. The canonical character training operation
 is an ordered event stream ending in EOS and remains a recurrent-state baseline,
 not a general sequence-memory claim. The automated curriculum entry point is
 `src/continual_agent/experiments/run_conversation.py`.
@@ -132,8 +132,9 @@ not a general sequence-memory claim. The automated curriculum entry point is
 Input presentations begin and end with dedicated neural boundary currents.
 `NetworkCore` advances neurons and delayed sparse synapses; drives provide
 current and plugins observe the resulting arrays. `RewardModulatedSTDP` owns
-eligibility and weight updates, while delayed reward is applied after readout
-evaluation. Supervised training remains an explicit runtime protocol rather than
+eligibility and weight updates. Generic event-stream training commits aggregate
+reward after readout evaluation, while the synthetic STDP curriculum commits
+event rewards as soon as outputs occur. Supervised training remains an explicit runtime protocol rather than
 a second network implementation. The runtime keeps aggregate diagnostics and
 reusable spike buffers, not a historical spike sequence.
 
