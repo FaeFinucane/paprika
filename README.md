@@ -28,6 +28,8 @@ through the spiking output populations and scored as timestamped events.
 
 - [Architecture](docs/ARCHITECTURE.md) — network structure, populations, and
   implementation locations.
+- [Network construction architecture](docs/remake/NETWORK_ARCHITECTURE.md) — population
+  layouts, connectivity specifications, seeding, and compiled network outputs.
 - [Training](docs/TRAINING.md) — raw-frame training and experiment controls.
 - [Tasks](docs/TASKS.md) — deferred and actionable work.
 - [Synthetic temporal experiments](docs/experiments/SYNTHETIC_TEMPORAL.md) — small
