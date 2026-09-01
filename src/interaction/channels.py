@@ -4,17 +4,19 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .network import FeaturePopulation
+from ..network.snn import Spikes
+from ..network.population import FeaturePopulation
 
 
 @dataclass
 class PopulationEncoder:
     amplitude: float = 1.0
 
-    def encode(self, features, population):
+    def encode(self, features: tuple[str, ...], population: FeaturePopulation) -> np.ndarray:
         if self.amplitude < 0:
             raise ValueError("amplitude must be non-negative")
         out = np.zeros(population.count)
+        # TODO: Could use the 'step' value in slice?
         for feature in features:
             out[
                 population.feature_bounds(feature).start
@@ -40,8 +42,9 @@ class PopulationDetector:
         if self.threshold < 0:
             raise ValueError("threshold must be non-negative")
 
-    def observe(self, spikes, population):
+    def observe(self, spikes: Spikes, population: FeaturePopulation):
         values = spikes.population(population)
+        # TODO: Should return ONE feature observation, not multiple.
         return tuple(
             FeatureObservation(
                 f,
@@ -67,11 +70,7 @@ class InputChannel:
     population: FeaturePopulation
     encoder: PopulationEncoder
 
-    def __post_init__(self):
-        if not isinstance(self.population, FeaturePopulation):
-            raise TypeError("InputChannel requires FeaturePopulation")
-
-    def encode(self, features):
+    def encode(self, features: tuple[str, ...]) -> np.ndarray:
         return self.encoder.encode(features, self.population)
 
 
@@ -80,11 +79,7 @@ class OutputChannel:
     population: FeaturePopulation
     detector: PopulationDetector
 
-    def __post_init__(self):
-        if not isinstance(self.population, FeaturePopulation):
-            raise TypeError("OutputChannel requires FeaturePopulation")
-
-    def observe(self, spikes):
+    def observe(self, spikes: Spikes):
         return self.detector.observe(spikes, self.population)
 
 
@@ -100,6 +95,8 @@ class EventInput:
             raise ValueError("duration must be positive")
 
 
+# TODO: EventOutput takes PopulationDetector to determine what the output is. I think.
+# But really the OutputChannel should just produce an EventOutput
 @dataclass
 class EventOutput:
     channel: OutputChannel
@@ -114,7 +111,7 @@ class EventOutput:
         if self.eos is not None and self.eos not in self.channel.population.features:
             raise ValueError("EOS feature is not in the output population")
 
-    def consume(self, observations):
+    def consume(self, observations: tuple[FeatureObservation, ...]) -> FeatureObservation | None:
         allowed = set(self.features) if self.features is not None else None
         candidates = [
             x for x in observations if x.active and (allowed is None or x.feature in allowed)

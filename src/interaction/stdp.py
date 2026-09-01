@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
+from ..network.snn import SNN, Spikes
 
 @dataclass
 class Learning:
@@ -15,7 +16,7 @@ class Learning:
     post: np.ndarray = field(init=False)
     pre_trace: np.ndarray = field(init=False)
     post_trace: np.ndarray = field(init=False)
-    accounted: set[str] = field(default_factory=set)
+    accounted: set[str] = field(default_factory=set[str])
 
     def __post_init__(self):
         if (
@@ -26,13 +27,14 @@ class Learning:
             or self.max_rpe <= 0
         ):
             raise ValueError("invalid learning configuration")
+        
         self.eligibility = np.zeros(self.synapse_count)
         self.pre = np.zeros(self.synapse_count, bool)
         self.post = np.zeros(self.synapse_count, bool)
         self.pre_trace = np.zeros(self.synapse_count)
         self.post_trace = np.zeros(self.synapse_count)
 
-    def observe(self, spikes, source, target):
+    def observe(self, spikes: Spikes, source: np.ndarray, target: np.ndarray):
         self.pre[:] = spikes.values[source]
         self.post[:] = spikes.values[target]
         self.eligibility *= self.trace_decay
@@ -40,7 +42,7 @@ class Learning:
         self.pre_trace = self.trace_decay * self.pre_trace + self.pre
         self.post_trace = self.trace_decay * self.post_trace + self.post
 
-    def rpe(self, reward, current_value, next_value, terminal=False):
+    def rpe(self, reward: float, current_value: float, next_value: float, terminal: bool = False):
         return float(
             np.clip(
                 reward + (0 if terminal else self.gamma * next_value) - current_value,
@@ -49,7 +51,7 @@ class Learning:
             )
         )
 
-    def update(self, snn, identity, reward, current_value=0.0, next_value=0.0, terminal=True):
+    def update(self, snn: SNN, identity: str, reward: float, current_value: float = 0.0, next_value: float = 0.0, terminal: bool = True):
         if identity in self.accounted:
             raise ValueError("outcome already accounted")
         signal = self.rpe(reward, current_value, next_value, terminal)

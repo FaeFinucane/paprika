@@ -16,7 +16,7 @@ class EvaluationReport:
 
 
 class Evaluator:
-    def evaluate(self, turn: Turn, expected, identity: str | None = None):
+    def evaluate(self, turn: Turn, expected: tuple[str, ...], identity: str | None = None):
         exp = tuple(expected)
         obs = tuple(x.feature for x in turn.outputs)
         matched = sum(a == b for a, b in zip(exp, obs))

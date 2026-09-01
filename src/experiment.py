@@ -3,26 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
 from .conversation import Conversation, OutputEvent
 from .evaluation import EvaluationReport, Evaluator
-from .interaction import InputChannel, OutputChannel, PopulationDetector, PopulationEncoder
-from .learning import Learning
-from .network import (
-    SNN,
-    BernoulliTopologySpec,
-    BimodalWeightSpec,
-    ConnectionSpec,
-    Connectivity,
-    FeaturePopulation,
-    FeaturePopulationSpec,
-    NeuronPopulationSpec,
-    PopulationLayout,
-)
+from .interaction.stdp import Learning
+from .interaction.channels import FeatureObservation, InputChannel, OutputChannel, PopulationDetector, PopulationEncoder
+from .network.population import FeaturePopulation, FeaturePopulationSpec, NeuronPopulationSpec, PopulationLayout
+from .network.connectivity import BernoulliTopologySpec, BimodalWeightSpec, ConnectionSpec, Connectivity
+from .network.snn import SNN
 from .reward import RewardPolicy
-
 
 @dataclass
 class MinimalExperiment:
@@ -33,7 +25,7 @@ class MinimalExperiment:
     evaluator: Evaluator
     reward_policy: RewardPolicy
     rng: np.random.Generator
-    trials: list[dict] = field(default_factory=list)
+    trials: list[dict[str, Any]] = field(default_factory=list[dict[str, Any]])
 
     def _decode(self, name: str) -> float:
         pop = self.snn.layout.population(name)
@@ -55,13 +47,14 @@ class MinimalExperiment:
         source = self.input_channel.encode((symbol,))
         current_value = self._decode("CRITIC")
         traces_before = self.learning.eligibility.copy()
+
         for _ in range(2):
             spikes = self.snn.step({self.input_channel.population: source})
             if training:
                 self.learning.observe(spikes, self.snn.synapses.source, self.snn.synapses.target)
 
-        observations = []
-        emitted = []
+        observations: list[FeatureObservation] = []
+        emitted: list[str] = []
         for _ in range(4):
             spikes = self.snn.step()
             if training:
@@ -97,7 +90,7 @@ class MinimalExperiment:
             if training
             else 0.0
         )
-        diagnostics = {
+        diagnostics: dict[str, Any] = {
             "identity": identity,
             "input": symbol,
             "output": tuple(emitted),
@@ -140,7 +133,7 @@ def build_minimal_experiment(seed: int = 0) -> MinimalExperiment:
             NeuronPopulationSpec("REWARD", 16),
         ]
     )
-    specs = []
+    specs: list[ConnectionSpec] = []
     for source, target in (
         ("INPUT_CHARS", "HIDDEN"),
         ("HIDDEN", "OUTPUT_CHARS"),
@@ -162,6 +155,7 @@ def build_minimal_experiment(seed: int = 0) -> MinimalExperiment:
     snn = SNN.build(layout, connectivity)
     input_pop = layout.population("INPUT_CHARS")
     output_pop = layout.population("OUTPUT_CHARS")
+    # TODO: Ideally we can extract these with better typing later.
     assert isinstance(input_pop, FeaturePopulation) and isinstance(output_pop, FeaturePopulation)
     return MinimalExperiment(
         snn,

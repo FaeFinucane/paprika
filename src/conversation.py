@@ -10,8 +10,8 @@ class OutputEvent:
 
 @dataclass
 class Turn:
-    inputs: list[str] = field(default_factory=list)
-    outputs: list[OutputEvent] = field(default_factory=list)
+    inputs: list[str] = field(default_factory=list[str])
+    outputs: list[OutputEvent] = field(default_factory=list[OutputEvent])
     status: str = "open"
     error: str | None = None
     start_tick: int | None = None
@@ -20,17 +20,17 @@ class Turn:
 
 @dataclass
 class Conversation:
-    turns: list[Turn] = field(default_factory=list)
+    turns: list[Turn] = field(default_factory=list[Turn])
     active: Turn | None = None
 
-    def begin(self, tick=None):
+    def begin(self, tick: int | None = None):
         if self.active is not None:
             raise RuntimeError("turn already active")
         self.active = Turn(start_tick=tick)
         self.turns.append(self.active)
         return self.active
 
-    def input(self, feature):
+    def input(self, feature: str):
         if self.active is None or self.active.status != "open":
             raise RuntimeError("no open turn")
         self.active.inputs.append(feature)
@@ -40,7 +40,7 @@ class Conversation:
             raise RuntimeError("no open turn")
         self.active.outputs.append(event)
 
-    def complete(self, status="eos", tick=None, error=None):
+    def complete(self, status: str = "eos", tick: int | None = None, error: str | None = None):
         if self.active is None or self.active.status != "open":
             raise RuntimeError("no open turn")
         if status not in {"eos", "timeout", "cancelled", "failed"}:
