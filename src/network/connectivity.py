@@ -35,33 +35,18 @@ class BernoulliTopologySpec:
 
 
 @dataclass(frozen=True)
-class BimodalWeightSpec:
-    positive_mean: float
-    negative_mean: float
-    negative_fraction: float
-    positive_spread: float = 0.0
-    negative_spread: float = 0.0
-    minimum: float = -1.0
-    maximum: float = 1.0
+class WeightSpec:
+    mean: float
+    spread: float = 0.0
 
     def __post_init__(self):
-        if (
-            self.minimum > self.maximum
-            or not 0 <= self.negative_fraction <= 1
-            or min(self.positive_spread, self.negative_spread) < 0
-        ):
+        if self.spread < 0:
             raise ValueError("invalid weight specification")
 
     def sample(self, count: int, rng: np.random.Generator) -> np.ndarray:
         if count < 0:
             raise ValueError("count must be non-negative")
-        negative = rng.random(count) < self.negative_fraction
-        result = np.where(
-            negative,
-            rng.normal(self.negative_mean, self.negative_spread, count),
-            rng.normal(self.positive_mean, self.positive_spread, count),
-        )
-        return np.clip(result, self.minimum, self.maximum).astype(float)
+        return rng.normal(self.mean, self.spread, count).astype(float)
 
 
 @dataclass
@@ -70,12 +55,14 @@ class SparseSynapses:
     source: np.ndarray
     target: np.ndarray
     weight: np.ndarray
+    # True where the synapse's source neuron is inhibitory
+    sign_lock: np.ndarray
     minimum: float = -1.0
     maximum: float = 1.0
     active: np.ndarray | None = None
 
     def __post_init__(self):
-        if not (self.source.shape == self.target.shape == self.weight.shape):
+        if not (self.source.shape == self.target.shape == self.weight.shape == self.sign_lock.shape):
             raise ValueError("synapse arrays must have equal shape")
         if self.active is None:
             self.active = np.ones(self.weight.size, dtype=bool)
@@ -89,6 +76,8 @@ class SparseSynapses:
         if not np.all(np.isfinite(self.weight)):
             raise ValueError("synapse weights must be finite")
         self.weight[:] = np.clip(self.weight, self.minimum, self.maximum)
+        self.weight[self.sign_lock] = np.minimum(self.weight[self.sign_lock], 0.0)
+        self.weight[~self.sign_lock] = np.maximum(self.weight[~self.sign_lock], 0.0)
 
 
 @dataclass(frozen=True)
@@ -96,7 +85,7 @@ class ConnectionSpec:
     source: str
     target: str
     topology: BernoulliTopologySpec
-    weight: BimodalWeightSpec
+    weight: WeightSpec
 
     @property
     def name(self):
@@ -111,13 +100,14 @@ class Connectivity:
     seed: int
 
     @staticmethod
-    def build(layout: PopulationLayout, specs: Sequence[ConnectionSpec], seed: int):
+    def build(layout: PopulationLayout, specs: Sequence[ConnectionSpec], seed: int, maximum: float = 1.0, minimum: float = -1.0):
         if len({(s.source, s.target) for s in specs}) != len(specs):
             raise ValueError("duplicate connection")
         
         sources: Sequence[np.ndarray] = []
         targets: Sequence[np.ndarray] = []
         weights: Sequence[np.ndarray] = []
+        sign_locks: Sequence[np.ndarray] = []
         edges: Mapping[str, np.ndarray] = {}
 
         for spec in specs:
@@ -127,21 +117,27 @@ class Connectivity:
             )
             a, b = spec.topology.build_edges(s, t, rng)
             w = spec.weight.sample(len(a), rng)
+
+            local_source = a - s.start
+            inhibitory = local_source >= (s.spec.count - s.spec.inhibitory_count)
+            w = np.where(inhibitory, -w, w)
+
             start = sum(map(len, sources))
             sources.append(a)
             targets.append(b)
             weights.append(w)
+            sign_locks.append(inhibitory)
             edges[spec.name] = np.arange(start, start + len(a))
-        
+
         return Connectivity(
             layout.fingerprint,
             SparseSynapses(
                 np.concatenate(sources) if sources else np.array([], int),
                 np.concatenate(targets) if targets else np.array([], int),
                 np.concatenate(weights) if weights else np.array([], float),
-                *(next(iter(specs)).weight.minimum, next(iter(specs)).weight.maximum)
-                if specs
-                else (-1.0, 1.0),
+                np.concatenate(sign_locks) if sign_locks else np.array([], bool),
+                -minimum,
+                maximum,
             ),
             edges,
             int(seed),

@@ -100,11 +100,18 @@ class SNN:
         delta = np.asarray(delta, dtype=float)
         if delta.shape != self.synapses.weight.shape or not np.all(np.isfinite(delta)):
             raise ValueError("invalid weight delta")
-        
-        active = self.synapses.active
 
-        self.synapses.weight[active] = np.clip(
-            self.synapses.weight[active] + delta[active],
+        active = self.synapses.active
+        weight = self.synapses.weight
+
+        weight[active] = np.clip(
+            weight[active] + delta[active],
             self.synapses.minimum,
             self.synapses.maximum,
         )
+
+        sign_lock = self.synapses.sign_lock
+        inhibitory = active & sign_lock
+        excitatory = active & ~sign_lock
+        weight[inhibitory] = np.minimum(weight[inhibitory], 0.0)
+        weight[excitatory] = np.maximum(weight[excitatory], 0.0)

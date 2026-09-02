@@ -22,7 +22,7 @@ import numpy as np
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, NumericChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.stdp import STDP
-from ..network.connectivity import BernoulliTopologySpec, BimodalWeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import BernoulliTopologySpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, NumericPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
@@ -73,6 +73,10 @@ class RewardSetup:
     edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
     reward_words: tuple[str, ...] = REWARD_WORDS
     reward_spike: float = 0.75
+    # Cancellation is a real, punished consequence, not just a withheld
+    # reward - see immediate_reward.py's duration_reward for why an
+    # actual negative RPE (LTD) is needed rather than 0.0 (no-op).
+    cancel_penalty: float = -0.75
 
     outputs: list[tuple[int, str]] = field(default_factory=list[tuple[int, str]])
     silent_ticks: int = 0
@@ -142,11 +146,10 @@ def deliver_reward(setup: RewardSetup, tick: int):
     word = str(setup.rng.choice(setup.reward_words))
     delivered_word, cancelled = deliver_word(setup, word)
 
-    value = 0.0 if cancelled else setup.reward_spike
+    value = setup.cancel_penalty if cancelled else setup.reward_spike
     setup.reward_channel.force(value)
     setup.rpe.notify(value)
-    if not cancelled:
-        setup.stdp.update(setup.session.snn)
+    setup.stdp.update(setup.session.snn)
 
     event = RewardEvent(tick, delivered_word, cancelled, value, setup.rpe.last_rpe)
     (setup.rewards_cancelled if cancelled else setup.rewards_given).append(event)
@@ -192,13 +195,13 @@ def run_epochs(setup: RewardSetup, ticks_per_epoch: int, epochs: int) -> list[Ep
     return [run_epoch(setup, ticks_per_epoch, index) for index in range(epochs)]
 
 
-DEFAULT_WEIGHT = BimodalWeightSpec(0.6, -0.1, 0.15, 0.04, 0.02)
+DEFAULT_WEIGHT = WeightSpec(0.6, 0.04)
 # HIDDEN -> REWARD and HIDDEN -> HIDDEN are seeded much weaker than the other
 # pathways: the former so ambient reward-population activity starts small
 # rather than swamping the ExternalRPE signal, the latter so the network can
 # actually fall silent between bursts instead of self-sustaining forever.
-REWARD_SEED_WEIGHT = BimodalWeightSpec(0.08, -0.03, 0.15, 0.01, 0.005)
-RECURRENT_SEED_WEIGHT = BimodalWeightSpec(0.08, -0.03, 0.15, 0.01, 0.005)
+REWARD_SEED_WEIGHT = WeightSpec(0.08, 0.01)
+RECURRENT_SEED_WEIGHT = WeightSpec(0.08, 0.01)
 
 
 def build_reward_experiment(
@@ -218,7 +221,7 @@ def build_reward_experiment(
         [
             FeaturePopulationSpec("REWARD_WORD", letters, 4),
             FeaturePopulationSpec("OUTPUT", ("SPEAK",), 6),
-            NeuronPopulationSpec("HIDDEN", 64),
+            NeuronPopulationSpec("HIDDEN", 64, inhibitory=0.3),
             NumericPopulationSpec("REWARD", 8, 8),
         ]
     )

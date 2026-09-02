@@ -14,15 +14,24 @@ from typing import Any, Literal, Sequence
 class NeuronPopulationSpec:
     name: str
     neuron_count: int
+    # Proportion (0-1) of this population's neurons that are inhibitory.
+    # Inhibitory neurons connect only to inhibitory synapses, see Dale's Principle.
+    inhibitory: float = 0.0
     kind: Literal["neurons"] = "neurons"
 
     def __post_init__(self):
         if self.neuron_count <= 0:
             raise ValueError("invalid neuron population")
+        if not 0 <= self.inhibitory <= 1:
+            raise ValueError("inhibitory must be a proportion between 0 and 1")
 
     @property
     def count(self):
         return self.neuron_count
+
+    @property
+    def inhibitory_count(self) -> int:
+        return round(self.neuron_count * self.inhibitory)
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,10 @@ class FeaturePopulationSpec:
     def count(self):
         return len(self.features) * self.feature_width
 
+    @property
+    def inhibitory_count(self) -> int:
+        return 0
+
     def feature_bounds(self, feature: str) -> slice[int]:
         index = self.features.index(feature)
         return slice(
@@ -62,6 +75,10 @@ class NumericPopulationSpec:
     @property
     def count(self):
         return self.positive + self.negative
+
+    @property
+    def inhibitory_count(self) -> int:
+        return 0
 
 # Population = NeuronPopulation | FeaturePopulation | NumericPopulation
 PopulationSpec = NeuronPopulationSpec | FeaturePopulationSpec | NumericPopulationSpec

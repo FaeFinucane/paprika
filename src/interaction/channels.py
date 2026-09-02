@@ -92,20 +92,13 @@ class EventOutput:
 @dataclass
 class PopulationEncoder:
     amplitude: float = 1.0
-
-    # When set, each active neuron independently draws a fresh
-    # uniform(0, amplitude) value on every call rather than all receiving
-    # the same fixed amplitude. Since encode() is called once per tick a
-    # feature is held (see FeatureInChannel.produce()), this means neurons
-    # in the population no longer cross threshold in lockstep on tick one -
-    # different neurons accumulate enough current at different ticks,
-    # spreading activation over the feature's presentation instead of
-    # requiring one synchronized instant to succeed.
     rng: np.random.Generator | None = None
 
-    def encode(self, feature: str, population: Population[FeaturePopulationSpec]) -> np.ndarray:
+    def __post_init__(self):
         if self.amplitude < 0:
             raise ValueError("amplitude must be non-negative")
+
+    def encode(self, feature: str, population: Population[FeaturePopulationSpec]) -> np.ndarray:
         out = np.zeros(population.spec.count)
         bounds = population.spec.feature_bounds(feature)
         if self.rng is not None:
@@ -140,15 +133,6 @@ class PopulationDecoder:
 @dataclass(slots=True)
 class NumericChannel(Influence, Observer):
     """A bidirectional numeric channel over a population's spikes.
-
-    Both the read value and any forced target are expressed on a fixed,
-    normalized scale of roughly [-1, 1] - a full-scale swing from all-negative
-    to all-positive spikes - rather than as raw spike counts. Raw counts scale
-    with population size (e.g. +/-8 for an 8/8 split), which means anything
-    computed from them (like an RPE signal derived from value deltas) scales
-    with population size too, and can end up large enough to saturate weights
-    in a single update. Normalizing keeps that magnitude fixed and predictable
-    regardless of how the population is sized.
     """
 
     population: Population[NumericPopulationSpec]
@@ -156,6 +140,7 @@ class NumericChannel(Influence, Observer):
 
     _read_value: float = field(default=0.0, init=False, repr=False)
     _write_value: float | None = field(default=0.0, init=False, repr=False)
+    # TODO: Fix scaling mechanism
     _scale: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self):

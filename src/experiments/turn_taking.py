@@ -22,7 +22,7 @@ import numpy as np
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, NumericChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.stdp import STDP
-from ..network.connectivity import BernoulliTopologySpec, BimodalWeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import BernoulliTopologySpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, NumericPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
@@ -81,6 +81,13 @@ class TurnTakingSetup:
     edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
     reward_words: tuple[str, ...] = REWARD_WORDS
     reward_spike: float = 0.75
+    cancel_penalty: float = -0.75
+    # Cancellation is only punished in proportion to recent response
+    # reliability (see recent_response_rate()), so it can't suppress the
+    # HIDDEN -> OUTPUT pathway before "respond to the prompt at all" is
+    # established - punishment strength tracks actual competence instead of
+    # a fixed schedule, and eases back off if punishment ever hurts it.
+    competence_window: int = 20
     prompt_duration: int = 3
     response_timeout: int = 40
     # Long enough for HIDDEN to fully clear its refractory period before the
@@ -100,6 +107,13 @@ class TurnTakingSetup:
             edge_weight = weight[indices]
             stats[name] = (float(edge_weight.min()), float(edge_weight.mean()), float(edge_weight.max()))
         return stats
+
+
+def recent_response_rate(setup: TurnTakingSetup) -> float:
+    recent = setup.turns[-setup.competence_window:]
+    if not recent:
+        return 0.0
+    return sum(t.responded for t in recent) / len(recent)
 
 
 def deliver_word(setup: TurnTakingSetup, word: str) -> tuple[str, bool]:
@@ -141,14 +155,14 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
     setup.prompt_channel.clear()
 
     if response_tick is not None:
+        competence = recent_response_rate(setup)
         word = str(setup.rng.choice(setup.reward_words))
         delivered_word, cancelled = deliver_word(setup, word)
 
-        value = 0.0 if cancelled else setup.reward_spike
+        value = setup.cancel_penalty * competence if cancelled else setup.reward_spike
         setup.reward_channel.force(value)
         setup.rpe.notify(value)
-        if not cancelled:
-            setup.stdp.update(setup.session.snn)
+        setup.stdp.update(setup.session.snn)
 
         event = RewardEvent(setup.session.snn.tick, delivered_word, cancelled, value, setup.rpe.last_rpe)
         (setup.rewards_cancelled if cancelled else setup.rewards_given).append(event)
@@ -195,9 +209,9 @@ def run_epochs(setup: TurnTakingSetup, ticks_per_epoch: int, epochs: int) -> lis
     return [run_epoch(setup, ticks_per_epoch, index) for index in range(epochs)]
 
 
-DEFAULT_WEIGHT = BimodalWeightSpec(0.6, -0.1, 0.15, 0.04, 0.02)
-REWARD_SEED_WEIGHT = BimodalWeightSpec(0.08, -0.03, 0.15, 0.01, 0.005)
-RECURRENT_SEED_WEIGHT = BimodalWeightSpec(0.08, -0.03, 0.15, 0.01, 0.005)
+DEFAULT_WEIGHT = WeightSpec(0.6, 0.04)
+REWARD_SEED_WEIGHT = WeightSpec(0.08, 0.01)
+RECURRENT_SEED_WEIGHT = WeightSpec(0.08, 0.01)
 
 
 def build_turn_taking_experiment(
@@ -217,7 +231,7 @@ def build_turn_taking_experiment(
             FeaturePopulationSpec("PROMPT", (PROMPT_FEATURE,), 4),
             FeaturePopulationSpec("REWARD_WORD", letters, 4),
             FeaturePopulationSpec("OUTPUT", ("SPEAK",), 6),
-            NeuronPopulationSpec("HIDDEN", 64),
+            NeuronPopulationSpec("HIDDEN", 64, inhibitory=0.3),
             NumericPopulationSpec("REWARD", 8, 8),
         ]
     )

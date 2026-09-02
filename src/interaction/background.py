@@ -12,7 +12,7 @@ from .plugins import Influence, Drives
 @dataclass
 class BackgroundDrive(Influence):
     populations: Sequence[Population[Any]]
-    amplitude: float # TODO: Amplitude not being used
+    amplitude: float
     rng: np.random.Generator
 
     def produce(self) -> Drives:

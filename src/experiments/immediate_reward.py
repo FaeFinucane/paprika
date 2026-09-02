@@ -13,7 +13,7 @@ import numpy as np
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.stdp import STDP
-from ..network.connectivity import BernoulliTopologySpec, BimodalWeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import BernoulliTopologySpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
@@ -21,10 +21,13 @@ from .external_rpe import ExternalRPE
 
 PROMPT_FEATURE = "CUE"
 REWARD_VALUE = 0.75
-DEFAULT_WEIGHT = BimodalWeightSpec(0.6, -0.1, 0.15, 0.04, 0.02)
+IDEAL_DURATION = 3
+# Lower means (down to ~0.25) also learn fine and show clearer resp% curves,
+# but 0.6 is kept as the baseline for future, more complex training.
+DEFAULT_WEIGHT = WeightSpec(0.6, 0.04)
 # Seeded much weaker than DEFAULT_WEIGHT so the network can still fall quiet
 # between responses instead of self-sustaining - see reward_shaping.py.
-RECURRENT_SEED_WEIGHT = BimodalWeightSpec(0.08, -0.03, 0.15, 0.01, 0.005)
+RECURRENT_SEED_WEIGHT = WeightSpec(0.08, 0.01)
 
 
 @dataclass
@@ -33,8 +36,10 @@ class Trial:
     end_tick: int
     responded: bool
     response_tick: int | None = None
+    duration: int | None = None
     reward_value: float | None = None
     rpe: float | None = None
+    violations: int = 0
 
 
 @dataclass
@@ -45,6 +50,8 @@ class EpochStats:
     trials: int
     responded: int
     mean_response_latency: float | None
+    mean_duration: float | None
+    violations: int
     weight_stats: dict[str, tuple[float, float, float]]
 
     @property
@@ -52,20 +59,52 @@ class EpochStats:
         return self.responded / self.trials if self.trials else 0.0
 
 
+def duration_reward(duration: int, ideal: int, base: float, tolerance: float) -> float:
+    """Peaks at ideal duration, goes negative beyond `tolerance` ticks off -
+    not floored at 0, so overshoot actively depresses rather than just
+    under-reinforces."""
+    return base * (1.0 - abs(duration - ideal) / tolerance)
+
+
+def ramp(step: int, length: int, start: float, end: float) -> float:
+    """Linear ramp from `start` to `end` over `length` steps, held at `end`
+    after - used to make behaviour tests stricter as training progresses
+    instead of applying full strictness (and punishment) from trial one."""
+    if length <= 0:
+        return end
+    t = min(1.0, step / length)
+    return start + (end - start) * t
+
+
 @dataclass
 class ImmediateRewardSetup:
-    """Wiring for the experiment plus accumulated trial history - the trial
-    logic itself lives in run_trial()/run_epoch(), not on this object."""
-
     session: Session
     prompt_channel: FeatureInChannel
     output_channel: FeatureOutChannel
     rpe: ExternalRPE
     stdp: STDP
+    rng: np.random.Generator
     edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
     reward_value: float = REWARD_VALUE
+    ideal_duration: int = IDEAL_DURATION
+    # Duration tolerance ramps from lenient (barely ever negative) to strict
+    # over the first `tolerance_ramp_trials` trials, so early training can
+    # first establish "respond at all" before being held to a precise
+    # duration - see ramp().
+    tolerance_start: float = 4.0
+    tolerance_end: float = 1.0
+    tolerance_ramp_trials: int = 150
+    max_duration: int = 15
     timeout: int = 40
     cooldown: int = 25
+    # Punishes output produced before the prompt arrives. Scaled up from 0
+    # (no punishment) to full strength over the same kind of ramp, so a
+    # network that hasn't learned to respond yet isn't also being punished
+    # for every bit of exploratory noise.
+    wait_min: int = 5
+    wait_max: int = 20
+    penalty_value: float = -REWARD_VALUE
+    penalty_ramp_trials: int = 150
 
     trials: list[Trial] = field(default_factory=list[Trial])
 
@@ -79,44 +118,61 @@ class ImmediateRewardSetup:
 
 
 def run_trial(setup: ImmediateRewardSetup) -> Trial:
-    """Present the prompt and run the session until a response is detected or
-    the timeout elapses, rewarding immediately (zero delay) if one occurs.
-    """
+    trial_index = len(setup.trials)
+    tolerance = ramp(trial_index, setup.tolerance_ramp_trials, setup.tolerance_start, setup.tolerance_end)
+    penalty = setup.penalty_value * ramp(trial_index, setup.penalty_ramp_trials, 0.0, 1.0)
+
+    violations = 0
+    if setup.wait_max > 0:
+        wait_ticks = int(setup.rng.integers(setup.wait_min, setup.wait_max + 1))
+        for _ in range(wait_ticks):
+            setup.session.tick()
+            active = setup.output_channel.current is not None
+            just_emitted = active and setup.output_channel.has_feature_changed
+            if just_emitted:
+                violations += 1
+                if penalty != 0.0:
+                    setup.rpe.notify(penalty)
+                    setup.stdp.update(setup.session.snn)
+
     start_tick = setup.session.snn.tick
     setup.prompt_channel.write(PROMPT_FEATURE)
 
     response_tick: int | None = None
-    reward_value: float | None = None
-    rpe_value: float | None = None
     for _ in range(setup.timeout):
         spikes = setup.session.tick()
         active = setup.output_channel.current is not None
         just_emitted = active and setup.output_channel.has_feature_changed
         if just_emitted:
             response_tick = spikes.tick
-            setup.rpe.notify(setup.reward_value)
-            setup.stdp.update(setup.session.snn)
-            reward_value = setup.reward_value
-            rpe_value = setup.rpe.last_rpe
             break
     setup.prompt_channel.clear()
 
-    # A quiet gap so refractory states clear before the next prompt, rather
-    # than immediately overlapping the tail of this trial.
+    duration: int | None = None
+    reward_value: float | None = None
+    rpe_value: float | None = None
+    if response_tick is not None:
+        duration = 1
+        for _ in range(setup.max_duration - 1):
+            setup.session.tick()
+            if setup.output_channel.current is None:
+                break
+            duration += 1
+
+        reward_value = duration_reward(duration, setup.ideal_duration, setup.reward_value, tolerance)
+        setup.rpe.notify(reward_value)
+        setup.stdp.update(setup.session.snn)
+        rpe_value = setup.rpe.last_rpe
+
     for _ in range(setup.cooldown):
         setup.session.tick()
 
-    trial = Trial(start_tick, setup.session.snn.tick, response_tick is not None, response_tick, reward_value, rpe_value)
+    trial = Trial(start_tick, setup.session.snn.tick, response_tick is not None, response_tick, duration, reward_value, rpe_value, violations)
     setup.trials.append(trial)
     return trial
 
 
 def run_epoch(setup: ImmediateRewardSetup, ticks: int, index: int = 0) -> EpochStats:
-    """Run whole trials until at least `ticks` have elapsed since the start of
-    this epoch. The boundary is checked between trials against the session's
-    own tick count, never mid-trial, so trial length can vary freely without
-    ever needing to split one across an epoch boundary.
-    """
     start_tick = setup.session.snn.tick
     start_trial_count = len(setup.trials)
     while setup.session.snn.tick - start_tick < ticks:
@@ -125,6 +181,8 @@ def run_epoch(setup: ImmediateRewardSetup, ticks: int, index: int = 0) -> EpochS
     epoch_trials = setup.trials[start_trial_count:]
     responded = [t for t in epoch_trials if t.responded]
     latencies = [t.response_tick - t.start_tick for t in responded if t.response_tick is not None]
+    durations = [t.duration for t in responded if t.duration is not None]
+    violations = sum(t.violations for t in epoch_trials)
     return EpochStats(
         index,
         start_tick,
@@ -132,6 +190,8 @@ def run_epoch(setup: ImmediateRewardSetup, ticks: int, index: int = 0) -> EpochS
         len(epoch_trials),
         len(responded),
         (sum(latencies) / len(latencies)) if latencies else None,
+        (sum(durations) / len(durations)) if durations else None,
+        violations,
         setup.weight_stats(),
     )
 
@@ -145,23 +205,29 @@ def build_immediate_reward_experiment(
     *,
     prompt_amplitude: float = 0.7,
     prompt_duration: int = 4,
-    # Shared with reward_shaping.py/turn_taking.py for a common baseline -
-    # kept at the low end of that range because, combined with HIDDEN ->
-    # HIDDEN recurrence, anything higher lets the network produce output
-    # from ambient excitation alone regardless of the prompt - self-defeating
-    # for an experiment meant to test whether reward reinforces a
-    # prompt-driven response specifically.
+    # Shared baseline with reward_shaping.py/turn_taking.py.
     background_amplitude: float = 0.12,
     timeout: int = 40,
     cooldown: int = 25,
     reward_value: float = REWARD_VALUE,
-    refractory_ticks: int = 4,
+    tolerance_start: float = 4.0,
+    tolerance_end: float = 1.0,
+    tolerance_ramp_trials: int = 150,
+    wait_min: int = 5,
+    wait_max: int = 20,
+    penalty_value: float = -REWARD_VALUE,
+    penalty_ramp_trials: int = 150,
+    # Low, unlike reward_shaping.py/turn_taking.py's shared 4, so burst
+    # duration is governed by excitatory/inhibitory balance rather than
+    # OUTPUT's own refractory period alone.
+    refractory_ticks: int = 1,
+    inhibitory: float = 0.3,
 ) -> ImmediateRewardSetup:
     layout = PopulationLayout.build(
         [
             FeaturePopulationSpec("PROMPT", (PROMPT_FEATURE,), 4),
             FeaturePopulationSpec("OUTPUT", ("SPEAK",), 6),
-            NeuronPopulationSpec("HIDDEN", 64),
+            NeuronPopulationSpec("HIDDEN", 64, inhibitory=inhibitory),
         ]
     )
     specs: list[ConnectionSpec] = []
@@ -182,9 +248,6 @@ def build_immediate_reward_experiment(
 
     hidden = layout.population("HIDDEN")
 
-    # Randomized per-tick encoding spreads PROMPT's 4 neurons' firing across
-    # the presentation instead of a synchronized lockstep instant, which also
-    # supplies the trial-to-trial variability needed to bootstrap learning.
     prompt_channel = FeatureInChannel(
         layout.population("PROMPT"),
         PopulationEncoder(prompt_amplitude, rng=rng),
@@ -207,23 +270,32 @@ def build_immediate_reward_experiment(
         output_channel,
         rpe,
         stdp,
+        rng,
         edges=connectivity.edges,
         reward_value=reward_value,
+        tolerance_start=tolerance_start,
+        tolerance_end=tolerance_end,
+        tolerance_ramp_trials=tolerance_ramp_trials,
         timeout=timeout,
         cooldown=cooldown,
+        wait_min=wait_min,
+        wait_max=wait_max,
+        penalty_value=penalty_value,
+        penalty_ramp_trials=penalty_ramp_trials,
     )
 
 
 def _print_report(seed: int, stats: list[EpochStats]):
     print(f"\n[seed={seed}]")
-    print(f"{'epoch':>5} {'trials':>6} {'resp%':>6} {'latency':>8} {'w(H->OUT)':>10} {'w(PROMPT->H)':>13}")
+    print(f"{'epoch':>5} {'trials':>6} {'resp%':>6} {'latency':>8} {'duration':>8} {'viol':>5} {'w(H->OUT)':>10} {'w(PROMPT->H)':>13}")
     for epoch in stats:
         latency = f"{epoch.mean_response_latency:.2f}" if epoch.mean_response_latency is not None else "-"
+        duration = f"{epoch.mean_duration:.2f}" if epoch.mean_duration is not None else "-"
         h_out = epoch.weight_stats.get("HIDDEN_to_OUTPUT", (0, 0, 0))[1]
         p_h = epoch.weight_stats.get("PROMPT_to_HIDDEN", (0, 0, 0))[1]
         print(
-            f"{epoch.index:>5} {epoch.trials:>6} {epoch.response_rate * 100:>5.1f}% {latency:>8} "
-            f"{h_out:>10.4f} {p_h:>13.4f}"
+            f"{epoch.index:>5} {epoch.trials:>6} {epoch.response_rate * 100:>5.1f}% {latency:>8} {duration:>8} "
+            f"{epoch.violations:>5} {h_out:>10.4f} {p_h:>13.4f}"
         )
 
 
