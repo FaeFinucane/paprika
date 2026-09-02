@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
 
 import numpy as np
 
@@ -19,11 +18,16 @@ class FeatureInChannel(Influence):
     # How long to send each feature to the input for
     duration: int = 1
 
-    _buffer: List[str] = [] # TODO: Queue?
+    _buffer: list[str] = field(default_factory=list[str]) # TODO: Queue?
     _current_duration: int = 0
 
     def write(self, feature: str):
         self._buffer.append(feature)
+
+    def clear(self):
+        """Discard any queued, not-yet-produced features."""
+        self._buffer.clear()
+        self._current_duration = 0
 
     def produce(self) -> Drives:
         if len(self._buffer) == 0:
@@ -89,11 +93,25 @@ class EventOutput:
 class PopulationEncoder:
     amplitude: float = 1.0
 
+    # When set, each active neuron independently draws a fresh
+    # uniform(0, amplitude) value on every call rather than all receiving
+    # the same fixed amplitude. Since encode() is called once per tick a
+    # feature is held (see FeatureInChannel.produce()), this means neurons
+    # in the population no longer cross threshold in lockstep on tick one -
+    # different neurons accumulate enough current at different ticks,
+    # spreading activation over the feature's presentation instead of
+    # requiring one synchronized instant to succeed.
+    rng: np.random.Generator | None = None
+
     def encode(self, feature: str, population: Population[FeaturePopulationSpec]) -> np.ndarray:
         if self.amplitude < 0:
             raise ValueError("amplitude must be non-negative")
         out = np.zeros(population.spec.count)
-        out[population.spec.feature_bounds(feature)] = self.amplitude
+        bounds = population.spec.feature_bounds(feature)
+        if self.rng is not None:
+            out[bounds] = self.rng.uniform(0.0, self.amplitude, size=out[bounds].shape)
+        else:
+            out[bounds] = self.amplitude
         return out
 
 
@@ -111,8 +129,9 @@ class PopulationDecoder:
         # Split to features
         features = values.reshape((len(population.spec.features), -1))
 
-        max_feature = features.max(axis=1).argmax()
-        max_feature_count = features[max_feature].max()
+        counts = features.sum(axis=1)
+        max_feature = counts.argmax()
+        max_feature_count = counts[max_feature]
 
         if max_feature_count >= self.threshold:
             return (population.spec.features[max_feature], max_feature_count)
@@ -120,18 +139,34 @@ class PopulationDecoder:
 
 @dataclass(slots=True)
 class NumericChannel(Influence, Observer):
+    """A bidirectional numeric channel over a population's spikes.
+
+    Both the read value and any forced target are expressed on a fixed,
+    normalized scale of roughly [-1, 1] - a full-scale swing from all-negative
+    to all-positive spikes - rather than as raw spike counts. Raw counts scale
+    with population size (e.g. +/-8 for an 8/8 split), which means anything
+    computed from them (like an RPE signal derived from value deltas) scales
+    with population size too, and can end up large enough to saturate weights
+    in a single update. Normalizing keeps that magnitude fixed and predictable
+    regardless of how the population is sized.
+    """
+
     population: Population[NumericPopulationSpec]
     rng: np.random.Generator
 
     _read_value: float = field(default=0.0, init=False, repr=False)
     _write_value: float | None = field(default=0.0, init=False, repr=False)
+    _scale: float = field(default=0.0, init=False, repr=False)
+
+    def __post_init__(self):
+        self._scale = max(self.population.spec.positive, self.population.spec.negative)
 
     @property
     def value(self) -> float:
         return self._read_value
 
     def force(self, new_value: float):
-        """Force the channel to a new value by manually overwriting neurons"""
+        """Force the channel to a new normalized value (roughly [-1, 1]) by manually overwriting neurons"""
         self._write_value = new_value
 
     def observe(self, spikes: Spikes):
@@ -139,20 +174,22 @@ class NumericChannel(Influence, Observer):
         # but with more redundancy.
         local_spikes = spikes.population(self.population)
 
-        new_value = (
+        raw_value = (
             local_spikes[:self.population.spec.positive].sum()
             - local_spikes[self.population.spec.positive:].sum()
         )
 
         # TODO: Determine if value should be point-in-time, or avg across time-period.
         # TODO: The issue with point-in-time is if neurons are in refractory.
-        self._read_value = new_value
+        self._read_value = raw_value / self._scale
 
     def produce(self) -> Drives:
         if self._write_value is None:
             return Drives()
 
-        diff = self._write_value - self._read_value
+        # Convert back to a raw neuron-count-equivalent for the ratio math
+        # below, which operates in units of "how many neurons to activate".
+        diff = (self._write_value - self._read_value) * self._scale
         if diff == 0:
             self._write_value = None
             return Drives()
@@ -162,16 +199,16 @@ class NumericChannel(Influence, Observer):
 
         # diff is the number of neurons we want to activate. First we activate the neurons with the same sign as diff,
         # then if we need to we de-activate neurons with the opposite sign.
-        positive_neuron_ratio = (
+        positive_neuron_ratio = np.clip((
             min(abs(diff), self.population.spec.positive)
             if diff > 0 else
             np.clip(-self.population.spec.positive, abs(diff) - self.population.spec.negative, 0)
-        ) / self.population.spec.positive
-        negative_neuron_ratio = (
+        ) / self.population.spec.positive, 0.0, 1.0)
+        negative_neuron_ratio = np.clip((
             min(abs(diff), self.population.spec.negative)
             if diff < 0 else
             np.clip(-self.population.spec.negative, abs(diff) - self.population.spec.positive, 0)
-        ) / self.population.spec.negative
+        ) / self.population.spec.negative, 0.0, 1.0)
 
         positive_drives = self.rng.choice([0.0, 1.0], size=self.population.spec.positive, p=[1 - positive_neuron_ratio, positive_neuron_ratio])
         negative_drives = self.rng.choice([0.0, 1.0], size=self.population.spec.negative, p=[1 - negative_neuron_ratio, negative_neuron_ratio])

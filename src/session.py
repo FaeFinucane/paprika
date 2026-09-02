@@ -18,7 +18,7 @@ class Session:
         drives = Drives()
 
         for influence in self.pre:
-            drives.accumulate(influence.produce())
+            drives = drives.accumulate(influence.produce())
 
         spikes = self.snn.step(drives.drives)
 
