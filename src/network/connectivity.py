@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
 from .population import Population, PopulationLayout
 import numpy as np
@@ -19,7 +19,7 @@ class BernoulliTopologySpec:
         if not np.isfinite(self.expected_fan_out) or self.expected_fan_out < 0:
             raise ValueError("fan-out must be finite and non-negative")
 
-    def build_edges(self, source: Population, target: Population, rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+    def build_edges(self, source: Population[Any], target: Population[Any], rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
         if self.expected_fan_out > target.count:
             raise ValueError("expected fan-out exceeds target population")
         
@@ -28,7 +28,7 @@ class BernoulliTopologySpec:
         dst = np.tile(np.arange(target.bounds.start, target.bounds.stop), source.count)
         keep = rng.random(src.size) < probability
 
-        if source.name == target.name:
+        if source.spec.name == target.spec.name:
             keep &= src != dst
 
         return src[keep], dst[keep]
@@ -66,6 +66,7 @@ class BimodalWeightSpec:
 
 @dataclass
 class SparseSynapses:
+    # TODO: Look into optimisations of this representation. It'll currently be non-sparse I think.
     source: np.ndarray
     target: np.ndarray
     weight: np.ndarray

@@ -1,45 +1,30 @@
 from dataclasses import dataclass, field
-from typing import Mapping
 
-import numpy as np
-
-from .interaction.plugins import Drive, Observer
-from .network.population import Population
-from .conversation import Conversation
+from .interaction.plugins import Drives, Influence, Observer
 from .network.snn import SNN, Spikes
 
 @dataclass
 class Control:
-    pre: list[Drive] = field(default_factory=list[Drive])
+    pre: list[Influence] = field(default_factory=list[Influence])
     post: list[Observer] = field(default_factory=list[Observer])
 
 @dataclass
 class Session:
     snn: SNN
-    conversation: Conversation = field(default_factory=Conversation)
-    pre: list[Drive] = field(default_factory=list[Drive])
+    pre: list[Influence] = field(default_factory=list[Influence])
     post: list[Observer] = field(default_factory=list[Observer])
 
-    def tick(self, drives: Mapping[Population, np.ndarray] | None = None):
-        merged = {
-            pop: np.asarray(value, dtype=float).copy() for pop, value in (drives or {}).items()
-        }
+    def tick(self):
+        drives = Drives()
 
-        for service in self.pre:
-            value = np.asarray(service.produce(), dtype=float)
-            if value.shape != (service.population.count,):
-                raise ValueError("control drive has the wrong shape")
-            merged[service.population] = (
-                merged.get(service.population, np.zeros(service.population.count)) + value
-            )
+        for influence in self.pre:
+            drives.accumulate(influence.produce())
 
-        for pop, value in merged.items():
-            if value.shape != (pop.count,):
-                raise ValueError("drive has the wrong shape")
-        spikes = self.snn.step(merged)
+        spikes = self.snn.step(drives.drives)
 
-        for service in self.post:
-            service.observe(spikes)
+        for influence in self.post:
+            influence.observe(spikes)
+            
         return spikes
 
 @dataclass

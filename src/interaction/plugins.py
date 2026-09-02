@@ -1,47 +1,32 @@
 
+from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-
+from typing import Any, Mapping
 import numpy as np
 
 from ..network.population import Population
 from ..network.snn import Spikes
 
-class Drive(ABC):
-    population: Population
+@dataclass
+class Drives:
+    drives: Mapping[Population[Any], np.ndarray] = {}
 
+    def accumulate(self, other: Drives) -> Drives:
+        merged = dict(self.drives)
+        for pop, value in other.drives.items():
+            if pop in merged:
+                merged[pop] = np.clip(merged[pop] + value, 0, 1)  # TODO: More advanced clamping logic?
+            else:
+                merged[pop] = value
+        return Drives(merged)
+
+class Influence(ABC):
     @abstractmethod
-    def produce(self) -> np.ndarray:
+    def produce(self) -> Drives:
         raise NotImplementedError
 
 class Observer(ABC):
     @abstractmethod
     def observe(self, spikes: Spikes) -> None:
         raise NotImplementedError
-
-@dataclass
-class BackgroundDrive(Drive):
-    population: Population
-    amplitude: float = 0.0
-    seed: int = 0
-
-    def __post_init__(self):
-        self.rng = np.random.default_rng(self.seed)
-
-    def produce(self) -> np.ndarray:
-        return np.full(self.population.bounds.stop - self.population.bounds.start, self.amplitude)
-
-@dataclass
-class Homeostasis(Drive, Observer):
-    population: Population
-    target_rate: float = 0.1
-    gain: float = 0.01
-    drive: float = 0.0
-
-    def observe(self, spikes: Spikes):
-        self.drive += self.gain * (
-            self.target_rate - float(spikes.population(self.population).mean())
-        )
-
-    def produce(self) -> np.ndarray:
-        return np.full(self.population.bounds.stop - self.population.bounds.start, self.drive)

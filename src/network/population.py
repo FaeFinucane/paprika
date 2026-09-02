@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Literal, Mapping, Sequence
+from typing import Any, Literal, Sequence
+
+# TODO: Consider moving population types up a level. Network layer only cares about number of neurons.
+# TODO: Additionally look at ways we could abstract things so we don't need Spec + Population for everything.
+# TODO: Maybe Population[PopulationSpec], with PopulationSpec being an ABC
 
 @dataclass(frozen=True)
 class NeuronPopulationSpec:
@@ -13,10 +17,12 @@ class NeuronPopulationSpec:
     kind: Literal["neurons"] = "neurons"
 
     def __post_init__(self):
-        if (
-            self.neuron_count <= 0
-        ):
+        if self.neuron_count <= 0:
             raise ValueError("invalid neuron population")
+
+    @property
+    def count(self):
+        return self.neuron_count
 
 
 @dataclass(frozen=True)
@@ -35,47 +41,54 @@ class FeaturePopulationSpec:
         ):
             raise ValueError("invalid feature population")
 
-
-@dataclass(frozen=True, slots=True)
-class NeuronPopulation:
-    name: str
-    bounds: slice[int]
-    layout_fingerprint: str
-
     @property
     def count(self):
-        return self.bounds.stop - self.bounds.start
-
-
-@dataclass(frozen=True, slots=True)
-class FeaturePopulation:
-    name: str
-    bounds: slice[int]
-    # TODO: This should be easy enough to compute by itself.
-    features: Mapping[str, slice[int]]
-    layout_fingerprint: str
-
-    def __hash__(self):
-        return hash((self.layout_fingerprint, self.name, self.bounds.start, self.bounds.stop))
-
-    @property
-    def count(self):
-        return self.bounds.stop - self.bounds.start
+        return len(self.features) * self.feature_width
 
     def feature_bounds(self, feature: str) -> slice[int]:
-        return self.features[feature]
+        index = self.features.index(feature)
+        return slice(
+            index * self.feature_width,
+            (index + 1) * self.feature_width,
+        )
 
+@dataclass(frozen=True, slots=True)
+class NumericPopulationSpec:
+    name: str
+    positive: int
+    negative: int
+    kind: Literal["numeric"] = "numeric"
 
-Population = NeuronPopulation | FeaturePopulation
+    @property
+    def count(self):
+        return self.positive + self.negative
 
+# Population = NeuronPopulation | FeaturePopulation | NumericPopulation
+PopulationSpec = NeuronPopulationSpec | FeaturePopulationSpec | NumericPopulationSpec
+
+@dataclass(frozen=True, slots=True)
+class Population[T: PopulationSpec]:
+    spec: T
+    start: int
+    layout_fingerprint: str
+
+    @property
+    def bounds(self) -> slice[int]:
+        return slice(self.start, self.start + self.spec.count)
+
+    @property
+    def count(self) -> int:
+        return self.spec.count
+
+# TODO: Consider build returning a dict of populations directly, to look up by name, as well as the layout itself.
 @dataclass(frozen=True)
 class PopulationLayout:
-    populations: tuple[Population, ...]
+    populations: tuple[Population[Any], ...]
     total_count: int
     fingerprint: str
 
     @staticmethod
-    def build(specs: Sequence[NeuronPopulationSpec | FeaturePopulationSpec]):
+    def build(specs: Sequence[NeuronPopulationSpec | FeaturePopulationSpec | NumericPopulationSpec]):
         if not specs:
             raise ValueError("at least one population is required")
         
@@ -86,30 +99,15 @@ class PopulationLayout:
         fp = sha256(raw).hexdigest()
 
         offset = 0
-        pops: Sequence[Population] = []
+        pops: Sequence[Population[Any]] = []
         for spec in specs:
-            count = (
-                spec.neuron_count
-                if isinstance(spec, NeuronPopulationSpec)
-                else len(spec.features) * spec.feature_width
-            )
-            bounds = slice(offset, offset + count)
-            offset += count
-            if isinstance(spec, FeaturePopulationSpec):
-                features = {
-                    f: slice(
-                        bounds.start + i * spec.feature_width,
-                        bounds.start + (i + 1) * spec.feature_width,
-                    )
-                    for i, f in enumerate(spec.features)
-                }
-                pops.append(FeaturePopulation(spec.name, bounds, features, fp))
-            else:
-                pops.append(NeuronPopulation(spec.name, bounds, fp))
+            bounds = slice(offset, offset + spec.count)
+            offset = bounds.stop
+            pops.append(Population(spec, bounds.start, fp))
         return PopulationLayout(tuple(pops), offset, fp)
 
-    def population(self, name: str) -> Population:
+    def population(self, name: str) -> Population[Any]:
         for p in self.populations:
-            if p.name == name:
+            if p.spec.name == name:
                 return p
         raise KeyError(f"unknown population {name!r}")

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Any, Mapping
 
 from .connectivity import Connectivity, SparseSynapses
 from .population import Population, PopulationLayout
@@ -14,7 +14,7 @@ class Spikes:
     values: np.ndarray
     tick: int
 
-    def population(self, population: Population) -> np.ndarray:
+    def population(self, population: Population[Any]) -> np.ndarray:
         if population.layout_fingerprint != self._fingerprint:
             raise ValueError("population belongs to another layout")
         
@@ -77,12 +77,12 @@ class SNN:
             np.zeros(layout.total_count),
         )
 
-    def step(self, external_current: Mapping[Population, np.ndarray] | None = None):
+    def step(self, external_current: Mapping[Population[Any], np.ndarray] | None = None):
         current = self.pending_current.copy()
         self.pending_current.fill(0)
         for pop, value in (external_current or {}).items():
             value = np.asarray(value, dtype=float)
-            if pop.layout_fingerprint != self.layout.fingerprint or value.shape != (pop.count,):
+            if pop.layout_fingerprint != self.layout.fingerprint or value.shape != (pop.spec.count,):
                 raise ValueError("invalid external current")
             current[pop.bounds] += value
         emitted = self.neurons.step(current)
