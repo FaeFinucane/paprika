@@ -91,8 +91,8 @@ class EventOutput:
 
 @dataclass
 class PopulationEncoder:
+    rng: np.random.Generator
     amplitude: float = 1.0
-    rng: np.random.Generator | None = None
 
     def __post_init__(self):
         if self.amplitude < 0:
@@ -101,10 +101,7 @@ class PopulationEncoder:
     def encode(self, feature: str, population: Population[FeaturePopulationSpec]) -> np.ndarray:
         out = np.zeros(population.spec.count)
         bounds = population.spec.feature_bounds(feature)
-        if self.rng is not None:
-            out[bounds] = self.rng.uniform(0.0, self.amplitude, size=out[bounds].shape)
-        else:
-            out[bounds] = self.amplitude
+        out[bounds] = self.rng.uniform(0.0, self.amplitude, size=out[bounds].shape)
         return out
 
 

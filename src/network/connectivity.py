@@ -4,26 +4,61 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import Any, Mapping, Protocol
 
 from .population import Population, PopulationLayout
 import numpy as np
 
 # TODO: Split out code for initializing weights from population & connectivity specs. Don't need initializer if we load from file. Initializer could even have info on loading from file.
 
+
+class TopologySpec(Protocol):
+    def build_edges(self, source: Population[Any], target: Population[Any], rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]: ...
+
 @dataclass(frozen=True)
-class BernoulliTopologySpec:
-    expected_fan_out: float
+class FanOutSpec(TopologySpec):
+    """Connects each source neuron to `expected` target neurons"""
+
+    expected: float
+    # TODO: Optional upper limit on how many target neurons to use
+    target_neurons: int = 0
 
     def __post_init__(self):
-        if not np.isfinite(self.expected_fan_out) or self.expected_fan_out < 0:
+        if not np.isfinite(self.expected) or self.expected < 0:
             raise ValueError("fan-out must be finite and non-negative")
 
     def build_edges(self, source: Population[Any], target: Population[Any], rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-        if self.expected_fan_out > target.count:
+        if self.expected > target.count:
             raise ValueError("expected fan-out exceeds target population")
-        
-        probability = self.expected_fan_out / target.count
+
+        probability = self.expected / target.count
+        src = np.repeat(np.arange(source.bounds.start, source.bounds.stop), target.count)
+        dst = np.tile(np.arange(target.bounds.start, target.bounds.stop), source.count)
+        keep = rng.random(src.size) < probability
+
+        if source.spec.name == target.spec.name:
+            keep &= src != dst
+
+        return src[keep], dst[keep]
+
+
+@dataclass(frozen=True)
+class FanInSpec(TopologySpec):
+    """Connects `expected` source neurons to each target neuron"""
+
+    expected: float
+    # TODO: Optional upper limit on how many source neurons to use 
+    source_neurons: int = 0
+
+    def __post_init__(self):
+        if not np.isfinite(self.expected) or self.expected < 0:
+            raise ValueError("fan-in must be finite and non-negative")
+
+    def build_edges(self, source: Population[Any], target: Population[Any], rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
+        if self.expected > source.count:
+            raise ValueError("expected fan-in exceeds source population")
+
+        probability = self.expected / source.count
         src = np.repeat(np.arange(source.bounds.start, source.bounds.stop), target.count)
         dst = np.tile(np.arange(target.bounds.start, target.bounds.stop), source.count)
         keep = rng.random(src.size) < probability
@@ -84,7 +119,7 @@ class SparseSynapses:
 class ConnectionSpec:
     source: str
     target: str
-    topology: BernoulliTopologySpec
+    topology: TopologySpec
     weight: WeightSpec
 
     @property
@@ -136,7 +171,7 @@ class Connectivity:
                 np.concatenate(targets) if targets else np.array([], int),
                 np.concatenate(weights) if weights else np.array([], float),
                 np.concatenate(sign_locks) if sign_locks else np.array([], bool),
-                -minimum,
+                minimum,
                 maximum,
             ),
             edges,

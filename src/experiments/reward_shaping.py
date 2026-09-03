@@ -22,7 +22,7 @@ import numpy as np
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, NumericChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.stdp import STDP
-from ..network.connectivity import BernoulliTopologySpec, WeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, NumericPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
@@ -209,11 +209,6 @@ def build_reward_experiment(
     *,
     cancel_on_interrupt: bool,
     hot_voltage: float = 0.3,
-    # Shared with immediate_reward.py/turn_taking.py for a common baseline.
-    # At this level reward_shaping currently goes silent (it has no external
-    # prompt to kickstart activity the way the other two do) - a known,
-    # separately-tracked issue, not something to retune around yet.
-    background_amplitude: float = 0.12,
     refractory_ticks: int = 4,
 ) -> RewardSetup:
     letters = tuple(sorted(set("".join(REWARD_WORDS) + NO_WORD)))
@@ -234,7 +229,7 @@ def build_reward_experiment(
     ):
         target_count = layout.population(target).count
         specs.append(
-            ConnectionSpec(source, target, BernoulliTopologySpec(min(fan_out, target_count)), weight)
+            ConnectionSpec(source, target, FanOutSpec(min(fan_out, target_count)), weight)
         )
     connectivity = Connectivity.build(layout, specs, seed)
     snn = SNN.build(layout, connectivity)
@@ -245,12 +240,12 @@ def build_reward_experiment(
 
     rng = np.random.default_rng(seed)
 
-    word_channel = FeatureInChannel(layout.population("REWARD_WORD"), PopulationEncoder(4.0))
+    word_channel = FeatureInChannel(layout.population("REWARD_WORD"), PopulationEncoder(rng, 4.0))
     output_channel = FeatureOutChannel(layout.population("OUTPUT"), PopulationDecoder(3.5))
     reward_channel = NumericChannel(layout.population("REWARD"), rng)
     rpe = ExternalRPE()
     stdp = STDP(snn, third_factor=rpe)
-    background = BackgroundDrive([hidden], background_amplitude, rng)
+    background = BackgroundDrive([hidden], rng)
 
     session = Session(
         snn,

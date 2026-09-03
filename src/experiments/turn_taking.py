@@ -7,7 +7,10 @@ saying a word ("yes"/"good") letter by letter and forcing the reward channel
 up. If the network interrupts the word (cancel_on_interrupt=True), we say
 "no" instead and force the reward channel to neutral (0.0).
 
-Learning is intent-gated via ExternalRPE - see reward_shaping.py.
+Learning is TD-style via two neural populations: REWARD (forced with ground
+truth - the "did this actually happen" signal) and PREDICTOR (never forced,
+trained purely from the rpe it helps produce - the network's own value
+prediction).
 """
 
 from __future__ import annotations
@@ -21,12 +24,12 @@ import numpy as np
 
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, NumericChannel, PopulationDecoder, PopulationEncoder
-from ..interaction.stdp import STDP
-from ..network.connectivity import BernoulliTopologySpec, WeightSpec, ConnectionSpec, Connectivity
+from ..interaction.stdp import RPE, STDP
+from ..network.connectivity import FanInSpec, FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, NumericPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
-from .external_rpe import ExternalRPE
+from .curriculum import ramp
 
 REWARD_WORDS: tuple[str, ...] = ("yes", "good")
 NO_WORD: str = "no"
@@ -39,7 +42,6 @@ class RewardEvent:
     word: str
     cancelled: bool
     reward_value: float | None = None
-    rpe: float | None = None
 
 
 @dataclass
@@ -74,7 +76,7 @@ class TurnTakingSetup:
     word_channel: FeatureInChannel
     output_channel: FeatureOutChannel
     reward_channel: NumericChannel
-    rpe: ExternalRPE
+    predictor_channel: NumericChannel
     stdp: STDP
     rng: np.random.Generator
     cancel_on_interrupt: bool
@@ -82,17 +84,20 @@ class TurnTakingSetup:
     reward_words: tuple[str, ...] = REWARD_WORDS
     reward_spike: float = 0.75
     cancel_penalty: float = -0.75
-    # Cancellation is only punished in proportion to recent response
-    # reliability (see recent_response_rate()), so it can't suppress the
-    # HIDDEN -> OUTPUT pathway before "respond to the prompt at all" is
-    # established - punishment strength tracks actual competence instead of
-    # a fixed schedule, and eases back off if punishment ever hurts it.
+    # Cancellation punishment scales with recent response reliability
+    # (recent_response_rate) and with how many rewards have actually been
+    # given so far (penalty_ramp_rewards) - not punished until the network
+    # has both learned to respond and actually earned some rewards.
     competence_window: int = 20
+    penalty_ramp_rewards: int = 10
+    # Caps how many times "no" gets repeated if the network keeps talking
+    # over it, so a network that never stops interrupting can't loop forever.
+    max_punishment_repeats: int = 3
+    # Unprompted output before CUE arrives is punished the same way.
+    wait_min: int = 5
+    wait_max: int = 20
     prompt_duration: int = 3
     response_timeout: int = 40
-    # Long enough for HIDDEN to fully clear its refractory period before the
-    # next prompt, so response reliability doesn't depend on where in that
-    # recovery window the prompt happens to land.
     cooldown: int = 25
 
     turns: list[Turn] = field(default_factory=list[Turn])
@@ -116,9 +121,52 @@ def recent_response_rate(setup: TurnTakingSetup) -> float:
     return sum(t.responded for t in recent) / len(recent)
 
 
+def step(setup: TurnTakingSetup):
+    """Advance one tick and apply the continuous three-factor STDP update -
+    the internal RPE (a TD-style diff of the REWARD channel) needs sampling
+    every tick, not just at reward-delivery moments, to actually function as
+    a value predictor rather than a one-shot associative signal."""
+    spikes = setup.session.tick()
+    setup.stdp.update(setup.session.snn)
+    return spikes
+
+
+def deliver_no(setup: TurnTakingSetup) -> bool:
+    """Say 'no' letter by letter, delivering competence-scaled punishment on
+    the last letter. Returns whether output occurred during delivery - the
+    caller repeats this if so, since talking over the punishment shouldn't
+    be a way to dodge it."""
+    for character in NO_WORD:
+        setup.word_channel.write(character)
+
+    remaining = len(NO_WORD)
+    interrupted = False
+    while remaining > 0:
+        step(setup)
+        active = setup.output_channel.current is not None
+        if active and setup.output_channel.has_feature_changed:
+            interrupted = True
+        remaining -= 1
+
+    competence = recent_response_rate(setup) * ramp(len(setup.rewards_given), setup.penalty_ramp_rewards, 0.0, 1.0)
+    value = setup.cancel_penalty * competence
+    setup.reward_channel.force(value)
+    step(setup)
+    setup.rewards_cancelled.append(RewardEvent(setup.session.snn.tick, NO_WORD, True, value))
+    return interrupted
+
+
+def punish(setup: TurnTakingSetup):
+    interrupted = True
+    repeats = 0
+    while interrupted and repeats < setup.max_punishment_repeats:
+        interrupted = deliver_no(setup)
+        repeats += 1
+
+
 def deliver_word(setup: TurnTakingSetup, word: str) -> tuple[str, bool]:
-    """Feed `word` letter by letter. If interrupted and cancel_on_interrupt is
-    set, switch immediately to NO_WORD instead - itself not cancellable.
+    """Feed `word` letter by letter. If interrupted and cancel_on_interrupt
+    is set, switch to punish() instead - itself repeated if interrupted too.
     Returns the word actually delivered and whether it was cancelled."""
     for character in word:
         setup.word_channel.write(character)
@@ -126,27 +174,37 @@ def deliver_word(setup: TurnTakingSetup, word: str) -> tuple[str, bool]:
     remaining = len(word)
     cancelled = False
     while remaining > 0:
-        setup.session.tick()
+        step(setup)
         active = setup.output_channel.current is not None
         just_emitted = active and setup.output_channel.has_feature_changed
         remaining -= 1
         if just_emitted and setup.cancel_on_interrupt and not cancelled:
             setup.word_channel.clear()
             cancelled = True
-            word = NO_WORD
-            for character in NO_WORD:
-                setup.word_channel.write(character)
-            remaining = len(NO_WORD)
-    return word, cancelled
+
+    if cancelled:
+        punish(setup)
+        return NO_WORD, True
+    return word, False
 
 
 def run_turn(setup: TurnTakingSetup) -> Turn:
     start_tick = setup.session.snn.tick
+
+    if setup.wait_max > 0:
+        wait_ticks = int(setup.rng.integers(setup.wait_min, setup.wait_max + 1))
+        for _ in range(wait_ticks):
+            step(setup)
+            active = setup.output_channel.current is not None
+            if active and setup.output_channel.has_feature_changed:
+                punish(setup)
+                break
+
     setup.prompt_channel.write(PROMPT_FEATURE)
 
     response_tick = None
     for _ in range(setup.prompt_duration + setup.response_timeout):
-        spikes = setup.session.tick()
+        spikes = step(setup)
         active = setup.output_channel.current is not None
         just_emitted = active and setup.output_channel.has_feature_changed
         if just_emitted:
@@ -155,20 +213,16 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
     setup.prompt_channel.clear()
 
     if response_tick is not None:
-        competence = recent_response_rate(setup)
         word = str(setup.rng.choice(setup.reward_words))
         delivered_word, cancelled = deliver_word(setup, word)
 
-        value = setup.cancel_penalty * competence if cancelled else setup.reward_spike
-        setup.reward_channel.force(value)
-        setup.rpe.notify(value)
-        setup.stdp.update(setup.session.snn)
-
-        event = RewardEvent(setup.session.snn.tick, delivered_word, cancelled, value, setup.rpe.last_rpe)
-        (setup.rewards_cancelled if cancelled else setup.rewards_given).append(event)
+        if not cancelled:
+            setup.reward_channel.force(setup.reward_spike)
+            step(setup)
+            setup.rewards_given.append(RewardEvent(setup.session.snn.tick, delivered_word, False, setup.reward_spike))
 
     for _ in range(setup.cooldown):
-        setup.session.tick()
+        step(setup)
 
     turn = Turn(start_tick, setup.session.snn.tick, response_tick is not None, response_tick)
     setup.turns.append(turn)
@@ -210,7 +264,12 @@ def run_epochs(setup: TurnTakingSetup, ticks_per_epoch: int, epochs: int) -> lis
 
 
 DEFAULT_WEIGHT = WeightSpec(0.6, 0.04)
+# Stronger than DEFAULT_WEIGHT to compensate for HIDDEN->OUTPUT's sparser
+# fan-in (see FanOutSpec/FanInSpec choice below) still reliably triggering
+# OUTPUT.
+OUTPUT_SEED_WEIGHT = WeightSpec(0.9, 0.04)
 REWARD_SEED_WEIGHT = WeightSpec(0.08, 0.01)
+PREDICTOR_SEED_WEIGHT = WeightSpec(0.08, 0.01)
 RECURRENT_SEED_WEIGHT = WeightSpec(0.08, 0.01)
 
 
@@ -218,12 +277,10 @@ def build_turn_taking_experiment(
     seed: int = 0,
     *,
     cancel_on_interrupt: bool,
-    prompt_amplitude: float = 5.0,
+    amplitude: float = 1.0,
     prompt_duration: int = 3,
-    # Shared with immediate_reward.py/reward_shaping.py for a common
-    # baseline.
-    background_amplitude: float = 0.12,
-    refractory_ticks: int = 4,
+    refractory_ticks: int = 1,
+    learning_rate: float = 0.001,
 ) -> TurnTakingSetup:
     letters = tuple(sorted(set("".join(REWARD_WORDS) + NO_WORD)))
     layout = PopulationLayout.build(
@@ -233,6 +290,7 @@ def build_turn_taking_experiment(
             FeaturePopulationSpec("OUTPUT", ("SPEAK",), 6),
             NeuronPopulationSpec("HIDDEN", 64, inhibitory=0.3),
             NumericPopulationSpec("REWARD", 8, 8),
+            NumericPopulationSpec("PREDICTOR", 8, 8),
         ]
     )
     specs: list[ConnectionSpec] = []
@@ -240,38 +298,42 @@ def build_turn_taking_experiment(
         ("PROMPT", "HIDDEN", 16, DEFAULT_WEIGHT),
         ("REWARD_WORD", "HIDDEN", 16, DEFAULT_WEIGHT),
         ("HIDDEN", "HIDDEN", 8, RECURRENT_SEED_WEIGHT),
-        ("HIDDEN", "OUTPUT", 8, DEFAULT_WEIGHT),
-        ("HIDDEN", "REWARD", 8, REWARD_SEED_WEIGHT),
     ):
-        target_count = layout.population(target).count
-        specs.append(
-            ConnectionSpec(source, target, BernoulliTopologySpec(min(fan_out, target_count)), weight)
-        )
+        specs.append(ConnectionSpec(source, target, FanOutSpec(fan_out), weight))
+    # Fan-in, not fan-out - a small target (unlike HIDDEN above) would
+    # otherwise saturate toward full density - see FanOutSpec.
+    specs.append(ConnectionSpec("HIDDEN", "OUTPUT", FanInSpec(24), OUTPUT_SEED_WEIGHT))
+    specs.append(ConnectionSpec("HIDDEN", "REWARD", FanInSpec(4), REWARD_SEED_WEIGHT))
+    specs.append(ConnectionSpec("HIDDEN", "PREDICTOR", FanInSpec(4), PREDICTOR_SEED_WEIGHT))
     connectivity = Connectivity.build(layout, specs, seed)
     snn = SNN.build(layout, connectivity)
     snn.neurons.refractory_ticks = refractory_ticks
 
     rng = np.random.default_rng(seed)
 
-    # Randomized per-tick encoding (see PopulationEncoder.rng) spreads
-    # activation across the presentation instead of the 4 PROMPT neurons
-    # firing in lockstep on tick one.
     prompt_channel = FeatureInChannel(
         layout.population("PROMPT"),
-        PopulationEncoder(prompt_amplitude, rng=rng),
+        PopulationEncoder(rng, amplitude),
         duration=prompt_duration,
     )
-    word_channel = FeatureInChannel(layout.population("REWARD_WORD"), PopulationEncoder(4.0))
+    word_channel = FeatureInChannel(layout.population("REWARD_WORD"), PopulationEncoder(rng, amplitude))
     output_channel = FeatureOutChannel(layout.population("OUTPUT"), PopulationDecoder(3.5))
     reward_channel = NumericChannel(layout.population("REWARD"), rng)
-    rpe = ExternalRPE()
-    stdp = STDP(snn, third_factor=rpe)
-    background = BackgroundDrive([layout.population("HIDDEN")], background_amplitude, rng)
+    predictor_channel = NumericChannel(layout.population("PREDICTOR"), rng)
+    rpe = RPE(reward_channel, predictor_channel)
+    stdp = STDP(snn, third_factor=rpe, learning_rate=learning_rate)
+    background = BackgroundDrive([layout.population("HIDDEN")], rng)
+    # PREDICTOR needs to fire occasionally on its own for STDP eligibility to
+    # have anything to reinforce - its own seed weight stays as low as
+    # REWARD's, so this (not synaptic strength) is what bootstraps it.
+    predictor_background = BackgroundDrive([layout.population("PREDICTOR")], rng, amplitude=0.9, sparsity=0.05)
 
     session = Session(
         snn,
-        pre=[prompt_channel, word_channel, reward_channel, background],
-        post=[output_channel, reward_channel, stdp],
+        # predictor_channel is never forced, so it's read-only (post) - never
+        # in pre, where its default write_value would fight its own activity.
+        pre=[prompt_channel, word_channel, reward_channel, background, predictor_background],
+        post=[output_channel, reward_channel, predictor_channel, stdp],
     )
 
     return TurnTakingSetup(
@@ -280,7 +342,7 @@ def build_turn_taking_experiment(
         word_channel,
         output_channel,
         reward_channel,
-        rpe,
+        predictor_channel,
         stdp,
         rng,
         cancel_on_interrupt,
@@ -306,7 +368,7 @@ if __name__ == "__main__":
     runs = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     for _ in range(runs):
         seed = random.randrange(2**32)
-        for cancel_on_interrupt in (True, False):
+        for cancel_on_interrupt in (True,):
             label = "cancel-on-interrupt" if cancel_on_interrupt else "ignore-interrupt"
             setup = build_turn_taking_experiment(seed, cancel_on_interrupt=cancel_on_interrupt)
-            _print_report(seed, label, run_epochs(setup, 500, 10))
+            _print_report(seed, label, run_epochs(setup, 500, 100))

@@ -13,10 +13,11 @@ import numpy as np
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.stdp import STDP
-from ..network.connectivity import BernoulliTopologySpec, WeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
+from .curriculum import ramp
 from .external_rpe import ExternalRPE
 
 PROMPT_FEATURE = "CUE"
@@ -64,16 +65,6 @@ def duration_reward(duration: int, ideal: int, base: float, tolerance: float) ->
     not floored at 0, so overshoot actively depresses rather than just
     under-reinforces."""
     return base * (1.0 - abs(duration - ideal) / tolerance)
-
-
-def ramp(step: int, length: int, start: float, end: float) -> float:
-    """Linear ramp from `start` to `end` over `length` steps, held at `end`
-    after - used to make behaviour tests stricter as training progresses
-    instead of applying full strictness (and punishment) from trial one."""
-    if length <= 0:
-        return end
-    t = min(1.0, step / length)
-    return start + (end - start) * t
 
 
 @dataclass
@@ -205,8 +196,6 @@ def build_immediate_reward_experiment(
     *,
     prompt_amplitude: float = 0.7,
     prompt_duration: int = 4,
-    # Shared baseline with reward_shaping.py/turn_taking.py.
-    background_amplitude: float = 0.12,
     timeout: int = 40,
     cooldown: int = 25,
     reward_value: float = REWARD_VALUE,
@@ -238,7 +227,7 @@ def build_immediate_reward_experiment(
     ):
         target_count = layout.population(target).count
         specs.append(
-            ConnectionSpec(source, target, BernoulliTopologySpec(min(fan_out, target_count)), weight)
+            ConnectionSpec(source, target, FanOutSpec(min(fan_out, target_count)), weight)
         )
     connectivity = Connectivity.build(layout, specs, seed)
     snn = SNN.build(layout, connectivity)
@@ -250,13 +239,13 @@ def build_immediate_reward_experiment(
 
     prompt_channel = FeatureInChannel(
         layout.population("PROMPT"),
-        PopulationEncoder(prompt_amplitude, rng=rng),
+        PopulationEncoder(rng, prompt_amplitude),
         duration=prompt_duration,
     )
     output_channel = FeatureOutChannel(layout.population("OUTPUT"), PopulationDecoder(3.5))
     rpe = ExternalRPE()
     stdp = STDP(snn, third_factor=rpe)
-    background = BackgroundDrive([hidden], background_amplitude, rng)
+    background = BackgroundDrive([hidden], rng)
 
     session = Session(
         snn,

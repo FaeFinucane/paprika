@@ -16,27 +16,21 @@ class RewardSignal(Protocol):
 
 @dataclass
 class RPE:
+    # reward_channel (R) is forced with ground truth; predictor_channel (V)
+    # never is, and is trained purely via this same rpe broadcast.
     reward_channel: NumericChannel
+    predictor_channel: NumericChannel
 
-    # TODO: Consider removing.
-    # Smooths the reward signal over time. 1.0 = no smoothing
-    smoothing: float = 1.0
+    # Future discount target - see TDE
+    discount: float = 0.95
 
-    # TODO: RPE should be in a specific range and normalized.
-
-    last_value: float = field(init=False, default=0.0)
-    smoothed: float = field(init=False, default=0.0)
-
-    def __post_init__(self):
-        if not 0 < self.smoothing <= 1:
-            raise ValueError("smoothing must be in (0, 1]")
+    prev_prediction: float = field(init=False, default=0.0)
 
     def calculate_rpe(self) -> float:
-        current_value = self.reward_channel.value
-        raw_rpe = current_value - self.last_value
-        self.last_value = current_value
-        self.smoothed = self.smoothing * raw_rpe + (1 - self.smoothing) * self.smoothed
-        return self.smoothed
+        value = self.predictor_channel.value
+        rpe = self.reward_channel.value + self.discount * value - self.prev_prediction
+        self.prev_prediction = value
+        return rpe
 
 @dataclass
 class STDP(Observer):
