@@ -1,33 +1,31 @@
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from ...network.snn import Spikes
 from ..channels import NumericChannel
+from ..plugins import Observer
 
 
 class RewardSignal(Protocol):
-    """Anything that can report a reward-prediction-error each tick - RPE
-    reads it from the neural REWARD population; other implementations (e.g.
-    an external/ground-truth stand-in) may compute it differently."""
+    """Gives the 'reward prediction error' value"""
 
-    def calculate_rpe(self) -> float: ...
+    value: float
 
 
 @dataclass
-class RPE:
+class RPE(Observer):
     # reward_channel (R) is forced with ground truth; predictor_channel (V)
     # never is, and is trained purely via this same rpe broadcast.
     reward_channel: NumericChannel
     predictor_channel: NumericChannel
 
-    # Discounts the bootstrap target (V(t+1)), not the value being corrected
-    # - damps the self-referential feedback loop that comes from V training
-    # on its own predictions, on top of the usual short-horizon discounting.
+    # Discount of future prediction
     discount: float = 0.95
 
+    value: float = field(init=False, default=0.0)
     prev_prediction: float = field(init=False, default=0.0)
 
-    def calculate_rpe(self) -> float:
-        value = self.predictor_channel.value
-        rpe = self.reward_channel.value + self.discount * value - self.prev_prediction
-        self.prev_prediction = value
-        return rpe
+    def observe(self, spikes: Spikes):
+        prediction = self.predictor_channel.value
+        self.value = self.reward_channel.value + self.discount * prediction - self.prev_prediction
+        self.prev_prediction = prediction

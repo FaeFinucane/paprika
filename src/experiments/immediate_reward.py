@@ -18,7 +18,6 @@ from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, Po
 from ..network.snn import SNN
 from ..session import Session
 from .curriculum import duration_reward, ramp
-from .external_rpe import ExternalRPE
 
 PROMPT_FEATURE = "CUE"
 REWARD_VALUE = 0.75
@@ -30,6 +29,13 @@ DEFAULT_WEIGHT = WeightSpec(0.6, 0.04)
 # between responses instead of self-sustaining - see reward_shaping.py.
 RECURRENT_SEED_WEIGHT = WeightSpec(0.08, 0.01)
 
+@dataclass
+class ExternalRPE:
+    """A stand-in for the internal plasticity.RPE to determine reward value externally."""
+    value: float = field(init=False, default=0.0)
+
+    def notify(self, value: float):
+        self.value = value
 
 @dataclass
 class Trial:
@@ -146,7 +152,7 @@ def run_trial(setup: ImmediateRewardSetup) -> Trial:
         reward_value = duration_reward(duration, setup.ideal_duration, setup.reward_value, tolerance)
         setup.rpe.notify(reward_value)
         setup.stdp.update(setup.session.snn)
-        rpe_value = setup.rpe.last_rpe
+        rpe_value = setup.rpe.value
 
     for _ in range(setup.cooldown):
         setup.session.tick()
@@ -164,7 +170,9 @@ def run_epoch(setup: ImmediateRewardSetup, ticks: int, index: int = 0) -> EpochS
 
     epoch_trials = setup.trials[start_trial_count:]
     responded = [t for t in epoch_trials if t.responded]
-    latencies = [t.response_tick - t.start_tick for t in responded if t.response_tick is not None]
+    # -1: the earliest a response can appear is start_tick + 1 (SNN.step()
+    # increments tick before returning), so 0 means "as early as possible".
+    latencies = [t.response_tick - t.start_tick - 1 for t in responded if t.response_tick is not None]
     durations = [t.duration for t in responded if t.duration is not None]
     violations = sum(t.violations for t in epoch_trials)
     return EpochStats(

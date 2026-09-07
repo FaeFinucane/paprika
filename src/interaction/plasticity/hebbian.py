@@ -64,18 +64,9 @@ class Hebbian(Observer):
         self.post_trace = self.trace_decay * self.post_trace + self.post
 
     def update(self, snn: SNN):
-        if self.third_factor is not None:
-            rpe = self.third_factor.calculate_rpe()
-        else:
-            rpe = 1.0
+        rpe = self.third_factor.value if self.third_factor is not None else 1.0
 
         if abs(rpe) < self.rpe_deadzone:
             return
 
-        # Note: eligibility is *not* reset here. It already decays naturally
-        # every tick in observe() (trace_decay), so this is safe - and
-        # necessary - to call every tick: a continuous reward-modulated
-        # (three-factor) update, rather than a single reward-modulated update
-        # sampled at one instant while real reward-channel activity happens
-        # continuously in between.
         snn.apply_weight_delta(self.learning_rate * rpe * self.eligibility * self.excitatory)

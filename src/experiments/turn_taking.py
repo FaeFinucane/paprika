@@ -49,6 +49,7 @@ class Turn:
     start_tick: int
     end_tick: int
     responded: bool
+    prompt_tick: int
     response_tick: int | None = None
 
 
@@ -208,6 +209,7 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
                 punish(setup)
                 break
 
+    prompt_tick = setup.session.snn.tick
     setup.prompt_channel.write(PROMPT_FEATURE)
 
     response_tick = None
@@ -245,7 +247,7 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
     for _ in range(setup.cooldown):
         step(setup)
 
-    turn = Turn(start_tick, setup.session.snn.tick, response_tick is not None, response_tick)
+    turn = Turn(start_tick, setup.session.snn.tick, response_tick is not None, prompt_tick, response_tick)
     setup.turns.append(turn)
     return turn
 
@@ -266,7 +268,9 @@ def run_epoch(setup: TurnTakingSetup, ticks: int, index: int = 0) -> EpochStats:
 
     epoch_turns = setup.turns[start_turn_count:]
     responded = [t for t in epoch_turns if t.responded]
-    latencies = [t.response_tick - t.start_tick for t in responded if t.response_tick is not None]
+    # -1: the earliest a response can appear is prompt_tick + 1 (SNN.step()
+    # increments tick before returning), so 0 means "as early as possible".
+    latencies = [t.response_tick - t.prompt_tick - 1 for t in responded if t.response_tick is not None]
     return EpochStats(
         index,
         start_tick,
@@ -358,7 +362,7 @@ def build_turn_taking_experiment(
         # predictor_channel is never forced, so it's read-only (post) - never
         # in pre, where its default write_value would fight its own activity.
         pre=[prompt_channel, word_channel, reward_channel, background, predictor_background],
-        post=[output_channel, reward_channel, predictor_channel, stdp, homeostatic],
+        post=[output_channel, reward_channel, predictor_channel, rpe, stdp, homeostatic],
     )
 
     return TurnTakingSetup(
