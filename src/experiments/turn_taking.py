@@ -24,12 +24,12 @@ import numpy as np
 
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, NumericChannel, PopulationDecoder, PopulationEncoder
-from ..interaction.stdp import RPE, STDP
+from ..interaction.plasticity import RPE, Hebbian, InhibitoryPlasticity
 from ..network.connectivity import FanInSpec, FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, NumericPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
-from .curriculum import ramp
+from .curriculum import duration_reward, ramp
 
 REWARD_WORDS: tuple[str, ...] = ("yes", "good")
 NO_WORD: str = "no"
@@ -77,12 +77,20 @@ class TurnTakingSetup:
     output_channel: FeatureOutChannel
     reward_channel: NumericChannel
     predictor_channel: NumericChannel
-    stdp: STDP
+    stdp: Hebbian
     rng: np.random.Generator
     cancel_on_interrupt: bool
     edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
     reward_words: tuple[str, ...] = REWARD_WORDS
     reward_spike: float = 0.75
+    ideal_duration: int = 3
+    # Ramps lenient -> strict over trials, like penalty_ramp_rewards below -
+    # a short first burst (duration=1) shouldn't be punished as harshly as a
+    # network that's already learned to respond at all.
+    tolerance_start: float = 4.0
+    tolerance_end: float = 1.0
+    tolerance_ramp_turns: int = 150
+    max_duration: int = 15
     cancel_penalty: float = -0.75
     # Cancellation punishment scales with recent response reliability
     # (recent_response_rate) and with how many rewards have actually been
@@ -213,13 +221,26 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
     setup.prompt_channel.clear()
 
     if response_tick is not None:
+        # Reward isn't delivered until output actually stops - a real
+        # consequence of the delay is that "stop outputting" becomes a
+        # precondition for any reward at all, not something we reward
+        # directly.
+        duration = 1
+        for _ in range(setup.max_duration - 1):
+            step(setup)
+            if setup.output_channel.current is None:
+                break
+            duration += 1
+
         word = str(setup.rng.choice(setup.reward_words))
         delivered_word, cancelled = deliver_word(setup, word)
 
         if not cancelled:
-            setup.reward_channel.force(setup.reward_spike)
+            tolerance = ramp(len(setup.turns), setup.tolerance_ramp_turns, setup.tolerance_start, setup.tolerance_end)
+            value = duration_reward(duration, setup.ideal_duration, setup.reward_spike, tolerance)
+            setup.reward_channel.force(value)
             step(setup)
-            setup.rewards_given.append(RewardEvent(setup.session.snn.tick, delivered_word, False, setup.reward_spike))
+            setup.rewards_given.append(RewardEvent(setup.session.snn.tick, delivered_word, False, value))
 
     for _ in range(setup.cooldown):
         step(setup)
@@ -281,6 +302,9 @@ def build_turn_taking_experiment(
     prompt_duration: int = 3,
     refractory_ticks: int = 1,
     learning_rate: float = 0.001,
+    # Measured HIDDEN mean per-tick firing probability during normal
+    # (prompted) operation - see the homeostatic plasticity design.
+    target_rate: float = 0.005,
 ) -> TurnTakingSetup:
     letters = tuple(sorted(set("".join(REWARD_WORDS) + NO_WORD)))
     layout = PopulationLayout.build(
@@ -321,7 +345,8 @@ def build_turn_taking_experiment(
     reward_channel = NumericChannel(layout.population("REWARD"), rng)
     predictor_channel = NumericChannel(layout.population("PREDICTOR"), rng)
     rpe = RPE(reward_channel, predictor_channel)
-    stdp = STDP(snn, third_factor=rpe, learning_rate=learning_rate)
+    stdp = Hebbian(snn, third_factor=rpe, learning_rate=learning_rate)
+    homeostatic = InhibitoryPlasticity(snn, target_rate=target_rate)
     background = BackgroundDrive([layout.population("HIDDEN")], rng)
     # PREDICTOR needs to fire occasionally on its own for STDP eligibility to
     # have anything to reinforce - its own seed weight stays as low as
@@ -333,7 +358,7 @@ def build_turn_taking_experiment(
         # predictor_channel is never forced, so it's read-only (post) - never
         # in pre, where its default write_value would fight its own activity.
         pre=[prompt_channel, word_channel, reward_channel, background, predictor_background],
-        post=[output_channel, reward_channel, predictor_channel, stdp],
+        post=[output_channel, reward_channel, predictor_channel, stdp, homeostatic],
     )
 
     return TurnTakingSetup(
@@ -368,7 +393,7 @@ if __name__ == "__main__":
     runs = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     for _ in range(runs):
         seed = random.randrange(2**32)
-        for cancel_on_interrupt in (True,):
+        for cancel_on_interrupt in (True, False):
             label = "cancel-on-interrupt" if cancel_on_interrupt else "ignore-interrupt"
             setup = build_turn_taking_experiment(seed, cancel_on_interrupt=cancel_on_interrupt)
-            _print_report(seed, label, run_epochs(setup, 500, 100))
+            _print_report(seed, label, run_epochs(setup, 500, 40))

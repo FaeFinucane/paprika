@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Literal, Sequence
 
+import numpy as np
+
 # TODO: Consider moving population types up a level. Network layer only cares about number of neurons.
 # TODO: Additionally look at ways we could abstract things so we don't need Spec + Population for everything.
 # TODO: Maybe Population[PopulationSpec], with PopulationSpec being an ABC
@@ -128,3 +130,11 @@ class PopulationLayout:
             if p.spec.name == name:
                 return p
         raise KeyError(f"unknown population {name!r}")
+
+    def neuron_types(self) -> np.ndarray[tuple[int],np.dtype[np.bool]]:
+        """Boolean mask of whether neurons are excitatory (false) or inhibitory (true)"""
+        mask = np.zeros(self.total_count, dtype=bool)
+        for p in self.populations:
+            if p.spec.inhibitory_count:
+                mask[p.bounds.stop - p.spec.inhibitory_count:p.bounds.stop] = True
+        return mask

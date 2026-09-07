@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping
 
 from .connectivity import Connectivity, SparseSynapses
@@ -32,20 +32,23 @@ class Spikes:
 
 @dataclass
 class LIFNeurons:
-    voltage: np.ndarray
-    refractory: np.ndarray
+    # True for inhibitory, false for excitatory
+    neuron_types: np.typing.NDArray[np.bool]
     threshold: float = 1.0
     decay: float = 0.9
     reset: float = 0.0
     refractory_ticks: int = 0
 
-    @classmethod
-    def build(cls, count: int, threshold: float = 1.0, decay: float = 0.9, reset: float = 0.0, refractory_ticks: int = 0):
-        if threshold <= 0 or not 0 <= decay <= 1 or refractory_ticks < 0:
+    voltage: np.ndarray = field(init = False)
+    refractory: np.ndarray = field(init = False)
+
+    def __post_init__(self):
+        if self.threshold <= 0 or not 0 <= self.decay <= 1 or self.refractory_ticks < 0:
             raise ValueError("invalid LIF parameters")
-        return cls(
-            np.zeros(count), np.zeros(count, dtype=int), threshold, decay, reset, refractory_ticks
-        )
+
+        count = self.neuron_types.shape[0]
+        self.voltage = np.zeros(count)
+        self.refractory = np.zeros(count) 
 
     def step(self, current: np.ndarray) -> np.ndarray:
         self.voltage[self.refractory > 0] = self.reset
@@ -72,7 +75,7 @@ class SNN:
             raise ValueError("layout/connectivity mismatch")
         return SNN(
             layout,
-            LIFNeurons.build(layout.total_count),
+            LIFNeurons(layout.neuron_types()),
             connectivity.synapses,
             np.zeros(layout.total_count),
         )
@@ -104,14 +107,15 @@ class SNN:
         active = self.synapses.active
         weight = self.synapses.weight
 
+        # TODO: Simplify clipping logic here, we're doing np.clip & np.min/np.max
         weight[active] = np.clip(
             weight[active] + delta[active],
             self.synapses.minimum,
             self.synapses.maximum,
         )
 
-        sign_lock = self.synapses.sign_lock
-        inhibitory = active & sign_lock
-        excitatory = active & ~sign_lock
+        source_inhibitory = self.neurons.neuron_types[self.synapses.source]
+        inhibitory = active & source_inhibitory
+        excitatory = active & ~source_inhibitory
         weight[inhibitory] = np.minimum(weight[inhibitory], 0.0)
         weight[excitatory] = np.maximum(weight[excitatory], 0.0)

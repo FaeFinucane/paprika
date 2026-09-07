@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from .population import Population, PopulationLayout
@@ -90,19 +90,14 @@ class SparseSynapses:
     source: np.ndarray
     target: np.ndarray
     weight: np.ndarray
-    # True where the synapse's source neuron is inhibitory
-    sign_lock: np.ndarray
     minimum: float = -1.0
     maximum: float = 1.0
-    active: np.ndarray | None = None
+    active: np.ndarray = field(init = False)
 
     def __post_init__(self):
-        if not (self.source.shape == self.target.shape == self.weight.shape == self.sign_lock.shape):
+        if not (self.source.shape == self.target.shape == self.weight.shape):
             raise ValueError("synapse arrays must have equal shape")
-        if self.active is None:
-            self.active = np.ones(self.weight.size, dtype=bool)
-        if self.active.shape != self.weight.shape:
-            raise ValueError("active mask shape mismatch")
+        self.active = np.ones(self.weight.size, dtype=bool)
         if (
             not (np.isfinite(self.minimum) and np.isfinite(self.maximum))
             or self.minimum > self.maximum
@@ -111,8 +106,6 @@ class SparseSynapses:
         if not np.all(np.isfinite(self.weight)):
             raise ValueError("synapse weights must be finite")
         self.weight[:] = np.clip(self.weight, self.minimum, self.maximum)
-        self.weight[self.sign_lock] = np.minimum(self.weight[self.sign_lock], 0.0)
-        self.weight[~self.sign_lock] = np.maximum(self.weight[~self.sign_lock], 0.0)
 
 
 @dataclass(frozen=True)
@@ -142,8 +135,8 @@ class Connectivity:
         sources: Sequence[np.ndarray] = []
         targets: Sequence[np.ndarray] = []
         weights: Sequence[np.ndarray] = []
-        sign_locks: Sequence[np.ndarray] = []
         edges: Mapping[str, np.ndarray] = {}
+        inhibitory_mask = layout.neuron_types()
 
         for spec in specs:
             s, t = layout.population(spec.source), layout.population(spec.target)
@@ -152,16 +145,12 @@ class Connectivity:
             )
             a, b = spec.topology.build_edges(s, t, rng)
             w = spec.weight.sample(len(a), rng)
-
-            local_source = a - s.start
-            inhibitory = local_source >= (s.spec.count - s.spec.inhibitory_count)
-            w = np.where(inhibitory, -w, w)
+            w = np.where(inhibitory_mask[a], -w, w)
 
             start = sum(map(len, sources))
             sources.append(a)
             targets.append(b)
             weights.append(w)
-            sign_locks.append(inhibitory)
             edges[spec.name] = np.arange(start, start + len(a))
 
         return Connectivity(
@@ -170,7 +159,6 @@ class Connectivity:
                 np.concatenate(sources) if sources else np.array([], int),
                 np.concatenate(targets) if targets else np.array([], int),
                 np.concatenate(weights) if weights else np.array([], float),
-                np.concatenate(sign_locks) if sign_locks else np.array([], bool),
                 minimum,
                 maximum,
             ),

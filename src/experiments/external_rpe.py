@@ -1,4 +1,4 @@
-"""A ground-truth stand-in for interaction.stdp.RPE, used with intent-gating.
+"""A ground-truth stand-in for interaction.plasticity.RPE, used with intent-gating.
 
 We found that a plasticity-magnitude deadzone can't reliably separate genuine
 reward signal from ambient network noise: reading the reward-channel value

@@ -67,12 +67,13 @@ class FeatureOutChannel(Observer):
             # Update the feature in-place
             self._current.evidence = evidence
             self._current.duration += 1
-        # New feature
-        self._current = EventOutput(
-            feature,
-            evidence,
-            spikes.tick
-        )
+        else:
+            # New feature
+            self._current = EventOutput(
+                feature,
+                evidence,
+                spikes.tick
+            )
 
     @property
     def current(self) -> EventOutput | None:

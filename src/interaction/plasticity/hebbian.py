@@ -1,44 +1,19 @@
+"""Reward-modulated (three-factor) Hebbian plasticity - excitatory synapses
+only. Inhibitory synapses use a separate, reward-independent homeostatic
+rule instead (see homeostatic.py) - real inhibitory plasticity isn't
+dopamine-gated the way this is."""
+
 from dataclasses import dataclass, field
-from typing import Protocol
+
 import numpy as np
 
-from ..network.snn import SNN, Spikes
-from .plugins import Observer
-from .channels import NumericChannel
+from ...network.snn import SNN, Spikes
+from ..plugins import Observer
+from .reward import RewardSignal
 
-
-class RewardSignal(Protocol):
-    """Anything that can report a reward-prediction-error each tick - RPE
-    reads it from the neural REWARD population; other implementations (e.g.
-    an external/ground-truth stand-in) may compute it differently."""
-
-    def calculate_rpe(self) -> float: ...
 
 @dataclass
-class RPE:
-    # reward_channel (R) is forced with ground truth; predictor_channel (V)
-    # never is, and is trained purely via this same rpe broadcast.
-    reward_channel: NumericChannel
-    predictor_channel: NumericChannel
-
-    # Future discount target - see TDE
-    discount: float = 0.95
-
-    prev_prediction: float = field(init=False, default=0.0)
-
-    def calculate_rpe(self) -> float:
-        value = self.predictor_channel.value
-        rpe = self.reward_channel.value + self.discount * value - self.prev_prediction
-        self.prev_prediction = value
-        return rpe
-
-@dataclass
-class STDP(Observer):
-    """
-    Implements a spike-timing-dependent plasticity (STDP) learning rule for the neural network.
-    This class observes neural spikes and updates synaptic weights based on the timing of pre- and post-synaptic spikes.
-    """
-
+class Hebbian(Observer):
     snn: SNN
     third_factor: RewardSignal | None = None
 
@@ -55,11 +30,13 @@ class STDP(Observer):
     # disables the deadzone (every nonzero rpe applies an update).
     rpe_deadzone: float = 0.0
 
+    # TODO: pre_trace/post_trace are identical to InhibitoryPlasticity's - extract and share.
     eligibility: np.ndarray = field(init=False)
     pre: np.ndarray = field(init=False)
     post: np.ndarray = field(init=False)
     pre_trace: np.ndarray = field(init=False)
     post_trace: np.ndarray = field(init=False)
+    excitatory: np.ndarray = field(init=False)
 
     def __post_init__(self):
         if (
@@ -68,18 +45,17 @@ class STDP(Observer):
             or self.rpe_deadzone < 0
         ):
             raise ValueError("invalid learning configuration")
-        
+
         synapse_count = len(self.snn.synapses.source)
-        
+
         self.eligibility = np.zeros(synapse_count)
         self.pre = np.zeros(synapse_count, bool)
         self.post = np.zeros(synapse_count, bool)
         self.pre_trace = np.zeros(synapse_count)
         self.post_trace = np.zeros(synapse_count)
+        self.excitatory = ~self.snn.neurons.neuron_types[self.snn.synapses.source]
 
-    # TODO: Why does this method take a source and a target?
     def observe(self, spikes: Spikes):
-        # Is this enough for determining elegibility?
         self.pre[:] = spikes.values[self.snn.synapses.source]
         self.post[:] = spikes.values[self.snn.synapses.target]
         self.eligibility *= self.trace_decay
@@ -87,7 +63,6 @@ class STDP(Observer):
         self.pre_trace = self.trace_decay * self.pre_trace + self.pre
         self.post_trace = self.trace_decay * self.post_trace + self.post
 
-    # TODO: Weight updates should *not* just be added ad-hoc, at least not long-term.
     def update(self, snn: SNN):
         if self.third_factor is not None:
             rpe = self.third_factor.calculate_rpe()
@@ -103,6 +78,4 @@ class STDP(Observer):
         # (three-factor) update, rather than a single reward-modulated update
         # sampled at one instant while real reward-channel activity happens
         # continuously in between.
-        snn.apply_weight_delta(self.learning_rate * rpe * self.eligibility)
-
-
+        snn.apply_weight_delta(self.learning_rate * rpe * self.eligibility * self.excitatory)

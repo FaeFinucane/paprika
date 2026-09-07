@@ -12,12 +12,12 @@ import numpy as np
 
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, PopulationDecoder, PopulationEncoder
-from ..interaction.stdp import STDP
+from ..interaction.plasticity import Hebbian, InhibitoryPlasticity
 from ..network.connectivity import FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
-from .curriculum import ramp
+from .curriculum import duration_reward, ramp
 from .external_rpe import ExternalRPE
 
 PROMPT_FEATURE = "CUE"
@@ -60,20 +60,13 @@ class EpochStats:
         return self.responded / self.trials if self.trials else 0.0
 
 
-def duration_reward(duration: int, ideal: int, base: float, tolerance: float) -> float:
-    """Peaks at ideal duration, goes negative beyond `tolerance` ticks off -
-    not floored at 0, so overshoot actively depresses rather than just
-    under-reinforces."""
-    return base * (1.0 - abs(duration - ideal) / tolerance)
-
-
 @dataclass
 class ImmediateRewardSetup:
     session: Session
     prompt_channel: FeatureInChannel
     output_channel: FeatureOutChannel
     rpe: ExternalRPE
-    stdp: STDP
+    stdp: Hebbian
     rng: np.random.Generator
     edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
     reward_value: float = REWARD_VALUE
@@ -211,6 +204,9 @@ def build_immediate_reward_experiment(
     # OUTPUT's own refractory period alone.
     refractory_ticks: int = 1,
     inhibitory: float = 0.3,
+    # High for this network's current small size - inhibition's capacity
+    # ceiling should come down as the network grows (see InhibitoryPlasticity).
+    target_rate: float = 0.3,
 ) -> ImmediateRewardSetup:
     layout = PopulationLayout.build(
         [
@@ -244,13 +240,14 @@ def build_immediate_reward_experiment(
     )
     output_channel = FeatureOutChannel(layout.population("OUTPUT"), PopulationDecoder(3.5))
     rpe = ExternalRPE()
-    stdp = STDP(snn, third_factor=rpe)
+    stdp = Hebbian(snn, third_factor=rpe)
+    homeostatic = InhibitoryPlasticity(snn, target_rate=target_rate)
     background = BackgroundDrive([hidden], rng)
 
     session = Session(
         snn,
         pre=[prompt_channel, background],
-        post=[output_channel, stdp],
+        post=[output_channel, stdp, homeostatic],
     )
 
     return ImmediateRewardSetup(
