@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from .connectivity import Connectivity, SparseSynapses
+from .connectivity import SparseSynapses
 from .population import Population, PopulationLayout
 import numpy as np
 
@@ -70,13 +70,11 @@ class SNN:
     tick: int = 0
 
     @staticmethod
-    def build(layout: PopulationLayout, connectivity: Connectivity):
-        if layout.fingerprint != connectivity.layout_fingerprint:
-            raise ValueError("layout/connectivity mismatch")
+    def build(layout: PopulationLayout, synapses: SparseSynapses):
         return SNN(
             layout,
             LIFNeurons(layout.neuron_types()),
-            connectivity.synapses,
+            synapses,
             np.zeros(layout.total_count),
         )
 

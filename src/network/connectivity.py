@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Any, Mapping, Protocol
+from typing import Any, Protocol
 
 from .population import Population, PopulationLayout
 import numpy as np
@@ -107,6 +107,18 @@ class SparseSynapses:
             raise ValueError("synapse weights must be finite")
         self.weight[:] = np.clip(self.weight, self.minimum, self.maximum)
 
+    def renormalize(self, layout: PopulationLayout, population: Population[Any], total: float):
+        """Renormalize all neuron input synapse weights to equal `total`"""
+        neuron_types = layout.neuron_types()
+        in_population = (self.target >= population.bounds.start) & (self.target < population.bounds.stop)
+        excitatory = in_population & ~neuron_types[self.source]
+
+        totals = np.bincount(self.target[excitatory], weights=self.weight[excitatory], minlength=neuron_types.shape[0])
+        scale = np.ones_like(totals)
+        nonzero = totals > 0
+        scale[nonzero] = total / totals[nonzero]
+
+        self.weight[excitatory] *= scale[self.target[excitatory]]
 
 @dataclass(frozen=True)
 class ConnectionSpec:
@@ -120,48 +132,35 @@ class ConnectionSpec:
         return f"{self.source}_to_{self.target}"
 
 
-@dataclass(frozen=True)
-class Connectivity:
-    layout_fingerprint: str
-    synapses: SparseSynapses
-    edges: Mapping[str, np.ndarray]
-    seed: int
+def build_synapses(
+    layout: PopulationLayout,
+    specs: Sequence[ConnectionSpec],
+    rng: np.random.Generator,
+    maximum: float = 1.0,
+    minimum: float = -1.0,
+) -> SparseSynapses:
+    if len({(s.source, s.target) for s in specs}) != len(specs):
+        raise ValueError("duplicate connection")
 
-    @staticmethod
-    def build(layout: PopulationLayout, specs: Sequence[ConnectionSpec], seed: int, maximum: float = 1.0, minimum: float = -1.0):
-        if len({(s.source, s.target) for s in specs}) != len(specs):
-            raise ValueError("duplicate connection")
-        
-        sources: Sequence[np.ndarray] = []
-        targets: Sequence[np.ndarray] = []
-        weights: Sequence[np.ndarray] = []
-        edges: Mapping[str, np.ndarray] = {}
-        inhibitory_mask = layout.neuron_types()
+    sources: list[np.ndarray] = []
+    targets: list[np.ndarray] = []
+    weights: list[np.ndarray] = []
+    inhibitory_mask = layout.neuron_types()
 
-        for spec in specs:
-            s, t = layout.population(spec.source), layout.population(spec.target)
-            rng = np.random.default_rng(
-                [int(seed), int.from_bytes(spec.name.encode(), "little") % (2**32)]
-            )
-            a, b = spec.topology.build_edges(s, t, rng)
-            w = spec.weight.sample(len(a), rng)
-            w = np.where(inhibitory_mask[a], -w, w)
+    for spec in specs:
+        s, t = layout.population(spec.source), layout.population(spec.target)
+        a, b = spec.topology.build_edges(s, t, rng)
+        w = spec.weight.sample(len(a), rng)
+        w = np.where(inhibitory_mask[a], -w, w)
 
-            start = sum(map(len, sources))
-            sources.append(a)
-            targets.append(b)
-            weights.append(w)
-            edges[spec.name] = np.arange(start, start + len(a))
+        sources.append(a)
+        targets.append(b)
+        weights.append(w)
 
-        return Connectivity(
-            layout.fingerprint,
-            SparseSynapses(
-                np.concatenate(sources) if sources else np.array([], int),
-                np.concatenate(targets) if targets else np.array([], int),
-                np.concatenate(weights) if weights else np.array([], float),
-                minimum,
-                maximum,
-            ),
-            edges,
-            int(seed),
-        )
+    return SparseSynapses(
+        np.concatenate(sources) if sources else np.array([], int),
+        np.concatenate(targets) if targets else np.array([], int),
+        np.concatenate(weights) if weights else np.array([], float),
+        minimum,
+        maximum,
+    )

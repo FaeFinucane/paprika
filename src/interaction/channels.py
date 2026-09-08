@@ -135,6 +135,7 @@ class NumericChannel(Influence, Observer):
 
     population: Population[NumericPopulationSpec]
     rng: np.random.Generator
+    trace_decay: float = 0.95
 
     _read_value: float = field(default=0.0, init=False, repr=False)
     _write_value: float | None = field(default=0.0, init=False, repr=False)
@@ -162,9 +163,10 @@ class NumericChannel(Influence, Observer):
             - local_spikes[self.population.spec.positive:].sum()
         )
 
-        # TODO: Determine if value should be point-in-time, or avg across time-period.
-        # TODO: The issue with point-in-time is if neurons are in refractory.
-        self._read_value = raw_value / self._scale
+        # EMA, not instantaneous - a sparse population's spike count at any
+        # single tick is mostly 0, discarding almost all signal exactly when
+        # it matters (see conversation).
+        self._read_value = self.trace_decay * self._read_value + (1.0 - self.trace_decay) * (raw_value / self._scale)
 
     def produce(self) -> Drives:
         if self._write_value is None:
