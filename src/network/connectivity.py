@@ -20,20 +20,30 @@ class FanOutSpec(TopologySpec):
     """Connects each source neuron to `expected` target neurons"""
 
     expected: float
-    # TODO: Optional upper limit on how many target neurons to use
     target_neurons: int = 0
 
     def __post_init__(self):
         if not np.isfinite(self.expected) or self.expected < 0:
             raise ValueError("fan-out must be finite and non-negative")
+        if self.target_neurons < 0:
+            raise ValueError("target_neurons must be non-negative")
 
     def build_edges(self, source: Population[Any], target: Population[Any], rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-        if self.expected > target.count:
+        if self.target_neurons > 0:
+            if self.target_neurons > target.count:
+                raise ValueError("target_neurons exceeds target population")
+            target_ids = rng.choice(np.arange(target.bounds.start, target.bounds.stop), size=self.target_neurons, replace=False)
+            pool_size = self.target_neurons
+        else:
+            target_ids = np.arange(target.bounds.start, target.bounds.stop)
+            pool_size = target.count
+
+        if self.expected > pool_size:
             raise ValueError("expected fan-out exceeds target population")
 
-        probability = self.expected / target.count
-        src = np.repeat(np.arange(source.bounds.start, source.bounds.stop), target.count)
-        dst = np.tile(np.arange(target.bounds.start, target.bounds.stop), source.count)
+        probability = self.expected / pool_size
+        src = np.repeat(np.arange(source.bounds.start, source.bounds.stop), pool_size)
+        dst = np.tile(target_ids, source.count)
         keep = rng.random(src.size) < probability
 
         if source.spec.name == target.spec.name:
@@ -47,20 +57,30 @@ class FanInSpec(TopologySpec):
     """Connects `expected` source neurons to each target neuron"""
 
     expected: float
-    # TODO: Optional upper limit on how many source neurons to use 
     source_neurons: int = 0
 
     def __post_init__(self):
         if not np.isfinite(self.expected) or self.expected < 0:
             raise ValueError("fan-in must be finite and non-negative")
+        if self.source_neurons < 0:
+            raise ValueError("source_neurons must be non-negative")
 
     def build_edges(self, source: Population[Any], target: Population[Any], rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray]:
-        if self.expected > source.count:
+        if self.source_neurons > 0:
+            if self.source_neurons > source.count:
+                raise ValueError("source_neurons exceeds source population")
+            source_ids = rng.choice(np.arange(source.bounds.start, source.bounds.stop), size=self.source_neurons, replace=False)
+            pool_size = self.source_neurons
+        else:
+            source_ids = np.arange(source.bounds.start, source.bounds.stop)
+            pool_size = source.count
+
+        if self.expected > pool_size:
             raise ValueError("expected fan-in exceeds source population")
 
-        probability = self.expected / source.count
-        src = np.repeat(np.arange(source.bounds.start, source.bounds.stop), target.count)
-        dst = np.tile(np.arange(target.bounds.start, target.bounds.stop), source.count)
+        probability = self.expected / pool_size
+        src = np.tile(source_ids, target.count)
+        dst = np.repeat(np.arange(target.bounds.start, target.bounds.stop), pool_size)
         keep = rng.random(src.size) < probability
 
         if source.spec.name == target.spec.name:
