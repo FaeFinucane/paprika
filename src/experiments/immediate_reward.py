@@ -5,15 +5,15 @@ from __future__ import annotations
 
 import random
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Mapping
 
 import numpy as np
 
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.plasticity import Hebbian, InhibitoryPlasticity
-from ..network.connectivity import FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import FanOutSpec, WeightSpec, ConnectionSpec, build_synapses
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
@@ -74,7 +74,7 @@ class ImmediateRewardSetup:
     rpe: ExternalRPE
     stdp: Hebbian
     rng: np.random.Generator
-    edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
+    specs: Sequence[ConnectionSpec] = field(default_factory=list)
     reward_value: float = REWARD_VALUE
     ideal_duration: int = IDEAL_DURATION
     # Duration tolerance ramps from lenient (barely ever negative) to strict
@@ -99,11 +99,18 @@ class ImmediateRewardSetup:
     trials: list[Trial] = field(default_factory=list[Trial])
 
     def weight_stats(self) -> dict[str, tuple[float, float, float]]:
-        weight = self.session.snn.synapses.weight
+        synapses = self.session.snn.synapses
+        weight = synapses.weight
         stats = {"all": (float(weight.min()), float(weight.mean()), float(weight.max()))}
-        for name, indices in self.edges.items():
-            edge_weight = weight[indices]
-            stats[name] = (float(edge_weight.min()), float(edge_weight.mean()), float(edge_weight.max()))
+        layout = self.session.snn.layout
+        for spec in self.specs:
+            source, target = layout.population(spec.source).bounds, layout.population(spec.target).bounds
+            mask = (
+                (synapses.source >= source.start) & (synapses.source < source.stop)
+                & (synapses.target >= target.start) & (synapses.target < target.stop)
+            )
+            edge_weight = weight[mask]
+            stats[spec.name] = (float(edge_weight.min()), float(edge_weight.mean()), float(edge_weight.max()))
         return stats
 
 
@@ -233,11 +240,11 @@ def build_immediate_reward_experiment(
         specs.append(
             ConnectionSpec(source, target, FanOutSpec(min(fan_out, target_count)), weight)
         )
-    connectivity = Connectivity.build(layout, specs, seed)
-    snn = SNN.build(layout, connectivity)
-    snn.neurons.refractory_ticks = refractory_ticks
-
     rng = np.random.default_rng(seed)
+
+    synapses = build_synapses(layout, specs, rng)
+    snn = SNN.build(layout, synapses)
+    snn.neurons.refractory_ticks = refractory_ticks
 
     hidden = layout.population("HIDDEN")
 
@@ -265,7 +272,7 @@ def build_immediate_reward_experiment(
         rpe,
         stdp,
         rng,
-        edges=connectivity.edges,
+        specs=specs,
         reward_value=reward_value,
         tolerance_start=tolerance_start,
         tolerance_end=tolerance_end,

@@ -136,9 +136,14 @@ class NumericChannel(Influence, Observer):
     population: Population[NumericPopulationSpec]
     rng: np.random.Generator
     trace_decay: float = 0.95
+    # Decay used at full population activation (|raw|/scale == 1) - interpolated
+    # with trace_decay by how salient (coincident) this tick's activity is, so a
+    # strong burst registers fast.
+    burst_trace_decay: float = 0.3
 
     _read_value: float = field(default=0.0, init=False, repr=False)
     _write_value: float | None = field(default=0.0, init=False, repr=False)
+    _write_ticks_remaining: int = field(default=0, init=False, repr=False)
     # TODO: Fix scaling mechanism
     _scale: float = field(default=0.0, init=False, repr=False)
 
@@ -149,9 +154,12 @@ class NumericChannel(Influence, Observer):
     def value(self) -> float:
         return self._read_value
 
-    def force(self, new_value: float):
-        """Force the channel to a new normalized value (roughly [-1, 1]) by manually overwriting neurons"""
+    def force(self, new_value: float, duration: int = 1):
+        """Force the channel toward a new normalized value (roughly [-1, 1])
+        by manually overwriting neurons, sustained for `duration` ticks - a
+        single tick barely registers against the EMA above (see conversation)."""
         self._write_value = new_value
+        self._write_ticks_remaining = duration
 
     def observe(self, spikes: Spikes):
         # TODO: Have different neurons represent different strengths, similar to binary
@@ -163,20 +171,21 @@ class NumericChannel(Influence, Observer):
             - local_spikes[self.population.spec.positive:].sum()
         )
 
-        # EMA, not instantaneous - a sparse population's spike count at any
-        # single tick is mostly 0, discarding almost all signal exactly when
-        # it matters (see conversation).
-        self._read_value = self.trace_decay * self._read_value + (1.0 - self.trace_decay) * (raw_value / self._scale)
+        # Salience + burst_trace_decay tries to assign greater importance to sudden, full activations
+        salience = abs(raw_value) / self._scale
+        decay = self.trace_decay - salience * (self.trace_decay - self.burst_trace_decay)
+        self._read_value = decay * self._read_value + (1.0 - decay) * (raw_value / self._scale)
 
     def produce(self) -> Drives:
-        if self._write_value is None:
+        if self._write_value is None or self._write_ticks_remaining <= 0:
             return Drives()
 
-        # Convert back to a raw neuron-count-equivalent for the ratio math
-        # below, which operates in units of "how many neurons to activate".
-        diff = (self._write_value - self._read_value) * self._scale
+        self._write_ticks_remaining -= 1
+
+        diff = self._write_value * self._scale
         if diff == 0:
-            self._write_value = None
+            if self._write_ticks_remaining <= 0:
+                self._write_value = None
             return Drives()
 
         # TODO: Algorithm is very imperfect. If neurons are already being driven, our approach overwrites some of those signals, forcing a set number to fire.
@@ -198,7 +207,8 @@ class NumericChannel(Influence, Observer):
         positive_drives = self.rng.choice([0.0, 1.0], size=self.population.spec.positive, p=[1 - positive_neuron_ratio, positive_neuron_ratio])
         negative_drives = self.rng.choice([0.0, 1.0], size=self.population.spec.negative, p=[1 - negative_neuron_ratio, negative_neuron_ratio])
 
-        self._write_value = None
+        if self._write_ticks_remaining <= 0:
+            self._write_value = None
 
         return Drives({
             self.population: np.concatenate([positive_drives, negative_drives])

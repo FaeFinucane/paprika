@@ -17,57 +17,24 @@ from __future__ import annotations
 
 import random
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import Mapping
 
 import numpy as np
 
 from ..interaction.background import BackgroundDrive
 from ..interaction.channels import FeatureInChannel, FeatureOutChannel, NumericChannel, PopulationDecoder, PopulationEncoder
 from ..interaction.plasticity import RPE, Hebbian, InhibitoryPlasticity
-from ..network.connectivity import FanInSpec, FanOutSpec, WeightSpec, ConnectionSpec, Connectivity
+from ..network.connectivity import FanInSpec, FanOutSpec, WeightSpec, ConnectionSpec, build_synapses
 from ..network.population import FeaturePopulationSpec, NeuronPopulationSpec, NumericPopulationSpec, PopulationLayout
 from ..network.snn import SNN
 from ..session import Session
 from .curriculum import duration_reward, ramp
+from .diagnostics import Cue, EpochStats, PredictorReport, Trial, TrialRecorder, attach_predictor_diagnostic, predictor_report, summarize_epoch
 
 REWARD_WORDS: tuple[str, ...] = ("yes", "good")
 NO_WORD: str = "no"
 PROMPT_FEATURE = "CUE"
-
-
-@dataclass
-class RewardEvent:
-    tick: int
-    word: str
-    cancelled: bool
-    reward_value: float | None = None
-
-
-@dataclass
-class Turn:
-    start_tick: int
-    end_tick: int
-    responded: bool
-    prompt_tick: int
-    response_tick: int | None = None
-
-
-@dataclass
-class EpochStats:
-    index: int
-    start_tick: int
-    end_tick: int
-    turns: int
-    responded: int
-    mean_response_latency: float | None
-    rewards_given: int
-    rewards_cancelled: int
-    weight_stats: dict[str, tuple[float, float, float]]
-
-    @property
-    def response_rate(self) -> float:
-        return self.responded / self.turns if self.turns else 0.0
 
 
 @dataclass
@@ -81,9 +48,10 @@ class TurnTakingSetup:
     stdp: Hebbian
     rng: np.random.Generator
     cancel_on_interrupt: bool
-    edges: Mapping[str, np.ndarray] = field(default_factory=dict[str, np.ndarray])
+    trial_recorder: TrialRecorder
+    specs: Sequence[ConnectionSpec] = field(default_factory=list)
     reward_words: tuple[str, ...] = REWARD_WORDS
-    reward_spike: float = 0.75
+    reward_spike: float = 1.0
     ideal_duration: int = 3
     # Ramps lenient -> strict over trials, like penalty_ramp_rewards below -
     # a short first burst (duration=1) shouldn't be punished as harshly as a
@@ -109,25 +77,43 @@ class TurnTakingSetup:
     response_timeout: int = 40
     cooldown: int = 25
 
-    turns: list[Turn] = field(default_factory=list[Turn])
-    outputs: list[tuple[int, str]] = field(default_factory=list[tuple[int, str]])
-    rewards_given: list[RewardEvent] = field(default_factory=list[RewardEvent])
-    rewards_cancelled: list[RewardEvent] = field(default_factory=list[RewardEvent])
-
     def weight_stats(self) -> dict[str, tuple[float, float, float]]:
-        weight = self.session.snn.synapses.weight
+        synapses = self.session.snn.synapses
+        weight = synapses.weight
         stats = {"all": (float(weight.min()), float(weight.mean()), float(weight.max()))}
-        for name, indices in self.edges.items():
-            edge_weight = weight[indices]
-            stats[name] = (float(edge_weight.min()), float(edge_weight.mean()), float(edge_weight.max()))
+        layout = self.session.snn.layout
+        for spec in self.specs:
+            source, target = layout.population(spec.source).bounds, layout.population(spec.target).bounds
+            mask = (
+                (synapses.source >= source.start) & (synapses.source < source.stop)
+                & (synapses.target >= target.start) & (synapses.target < target.stop)
+            )
+            edge_weight = weight[mask]
+            stats[spec.name] = (float(edge_weight.min()), float(edge_weight.mean()), float(edge_weight.max()))
         return stats
 
 
+def total_reward_count(setup: TurnTakingSetup) -> int:
+    return sum(t.count_cue(Cue.REWARD) for t in setup.trial_recorder.trials)
+
+
 def recent_response_rate(setup: TurnTakingSetup) -> float:
-    recent = setup.turns[-setup.competence_window:]
+    recent = setup.trial_recorder.trials[-setup.competence_window:]
     if not recent:
         return 0.0
-    return sum(t.responded for t in recent) / len(recent)
+    return sum(t.has_cue(Cue.RESPONSE) for t in recent) / len(recent)
+
+
+def start_trial(setup: TurnTakingSetup):
+    setup.trial_recorder.start(setup.session.snn.tick)
+
+
+def mark(setup: TurnTakingSetup, cue: Cue):
+    setup.trial_recorder.mark(cue, setup.session.snn.tick)
+
+
+def finalize_trial(setup: TurnTakingSetup) -> Trial:
+    return setup.trial_recorder.finalize(setup.session.snn.tick)
 
 
 def step(setup: TurnTakingSetup):
@@ -157,11 +143,12 @@ def deliver_no(setup: TurnTakingSetup) -> bool:
             interrupted = True
         remaining -= 1
 
-    competence = recent_response_rate(setup) * ramp(len(setup.rewards_given), setup.penalty_ramp_rewards, 0.0, 1.0)
+    competence = recent_response_rate(setup) * ramp(total_reward_count(setup), setup.penalty_ramp_rewards, 0.0, 1.0)
     value = setup.cancel_penalty * competence
-    setup.reward_channel.force(value)
+    setup.reward_channel.force(value, duration=3)
     step(setup)
-    setup.rewards_cancelled.append(RewardEvent(setup.session.snn.tick, NO_WORD, True, value))
+    mark(setup, Cue.PUNISH)
+    setup.trial_recorder.set_extra("punish_value", value)
     return interrupted
 
 
@@ -197,8 +184,8 @@ def deliver_word(setup: TurnTakingSetup, word: str) -> tuple[str, bool]:
     return word, False
 
 
-def run_turn(setup: TurnTakingSetup) -> Turn:
-    start_tick = setup.session.snn.tick
+def run_turn(setup: TurnTakingSetup) -> Trial:
+    start_trial(setup)
 
     if setup.wait_max > 0:
         wait_ticks = int(setup.rng.integers(setup.wait_min, setup.wait_max + 1))
@@ -208,21 +195,28 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
             if active and setup.output_channel.has_feature_changed:
                 punish(setup)
                 break
+    mark(setup, Cue.BASELINE)
 
-    prompt_tick = setup.session.snn.tick
     setup.prompt_channel.write(PROMPT_FEATURE)
 
-    response_tick = None
-    for _ in range(setup.prompt_duration + setup.response_timeout):
-        spikes = step(setup)
+    responded = False
+    for i in range(setup.prompt_duration + setup.response_timeout):
+        step(setup)
+        if i == 0:
+            # After the cue has had one tick to actually reach HIDDEN and
+            # propagate back, not at the instant of writing it - marking
+            # immediately after write() would be identical to baseline by
+            # construction, since no simulation time would have passed.
+            mark(setup, Cue.PROMPT)
         active = setup.output_channel.current is not None
         just_emitted = active and setup.output_channel.has_feature_changed
         if just_emitted:
-            response_tick = spikes.tick
+            responded = True
             break
     setup.prompt_channel.clear()
 
-    if response_tick is not None:
+    if responded:
+        mark(setup, Cue.RESPONSE)
         # Reward isn't delivered until output actually stops - a real
         # consequence of the delay is that "stop outputting" becomes a
         # precondition for any reward at all, not something we reward
@@ -233,23 +227,26 @@ def run_turn(setup: TurnTakingSetup) -> Turn:
             if setup.output_channel.current is None:
                 break
             duration += 1
+        setup.trial_recorder.set_extra("response_duration", duration)
 
         word = str(setup.rng.choice(setup.reward_words))
         delivered_word, cancelled = deliver_word(setup, word)
 
         if not cancelled:
-            tolerance = ramp(len(setup.turns), setup.tolerance_ramp_turns, setup.tolerance_start, setup.tolerance_end)
+            tolerance = ramp(len(setup.trial_recorder.trials), setup.tolerance_ramp_turns, setup.tolerance_start, setup.tolerance_end)
             value = duration_reward(duration, setup.ideal_duration, setup.reward_spike, tolerance)
-            setup.reward_channel.force(value)
+            setup.reward_channel.force(value, duration=3)
             step(setup)
-            setup.rewards_given.append(RewardEvent(setup.session.snn.tick, delivered_word, False, value))
+            mark(setup, Cue.REWARD)
+            setup.trial_recorder.set_extra("reward_value", value)
+            setup.trial_recorder.set_extra("delivered_word", delivered_word)
+        else:
+            mark(setup, Cue.CANCELLED)
 
     for _ in range(setup.cooldown):
         step(setup)
 
-    turn = Turn(start_tick, setup.session.snn.tick, response_tick is not None, prompt_tick, response_tick)
-    setup.turns.append(turn)
-    return turn
+    return finalize_trial(setup)
 
 
 def run(setup: TurnTakingSetup, ticks: int):
@@ -259,32 +256,19 @@ def run(setup: TurnTakingSetup, ticks: int):
     return setup
 
 
-def run_epoch(setup: TurnTakingSetup, ticks: int, index: int = 0) -> EpochStats:
+def run_epoch(setup: TurnTakingSetup, ticks: int, index: int = 0) -> tuple[EpochStats, PredictorReport]:
     start_tick = setup.session.snn.tick
-    start_turn_count = len(setup.turns)
-    start_given, start_cancelled = len(setup.rewards_given), len(setup.rewards_cancelled)
+    start_trial_count = len(setup.trial_recorder.trials)
 
     run(setup, ticks)
 
-    epoch_turns = setup.turns[start_turn_count:]
-    responded = [t for t in epoch_turns if t.responded]
-    # -1: the earliest a response can appear is prompt_tick + 1 (SNN.step()
-    # increments tick before returning), so 0 means "as early as possible".
-    latencies = [t.response_tick - t.prompt_tick - 1 for t in responded if t.response_tick is not None]
-    return EpochStats(
-        index,
-        start_tick,
-        setup.session.snn.tick,
-        len(epoch_turns),
-        len(responded),
-        (sum(latencies) / len(latencies)) if latencies else None,
-        len(setup.rewards_given) - start_given,
-        len(setup.rewards_cancelled) - start_cancelled,
-        setup.weight_stats(),
-    )
+    epoch_trials = setup.trial_recorder.trials[start_trial_count:]
+    stats = summarize_epoch(epoch_trials, index, start_tick, setup.session.snn.tick, setup.weight_stats())
+    discount = getattr(setup.stdp.third_factor, "discount", 0.95)
+    return stats, predictor_report(epoch_trials, discount)
 
 
-def run_epochs(setup: TurnTakingSetup, ticks_per_epoch: int, epochs: int) -> list[EpochStats]:
+def run_epochs(setup: TurnTakingSetup, ticks_per_epoch: int, epochs: int) -> list[tuple[EpochStats, PredictorReport]]:
     return [run_epoch(setup, ticks_per_epoch, index) for index in range(epochs)]
 
 
@@ -309,6 +293,10 @@ def build_turn_taking_experiment(
     # Measured HIDDEN mean per-tick firing probability during normal
     # (prompted) operation - see the homeostatic plasticity design.
     target_rate: float = 0.005,
+    # PREDICTOR's seed weight alone left it too weak for HIDDEN to reliably
+    # drive at all - renormalized total, measured empirically (see
+    # conversation), same reasoning as discrimination.py's fix.
+    predictor_renormalize_total: float = 5.0,
 ) -> TurnTakingSetup:
     letters = tuple(sorted(set("".join(REWARD_WORDS) + NO_WORD)))
     layout = PopulationLayout.build(
@@ -333,11 +321,13 @@ def build_turn_taking_experiment(
     specs.append(ConnectionSpec("HIDDEN", "OUTPUT", FanInSpec(24), OUTPUT_SEED_WEIGHT))
     specs.append(ConnectionSpec("HIDDEN", "REWARD", FanInSpec(4), REWARD_SEED_WEIGHT))
     specs.append(ConnectionSpec("HIDDEN", "PREDICTOR", FanInSpec(4), PREDICTOR_SEED_WEIGHT))
-    connectivity = Connectivity.build(layout, specs, seed)
-    snn = SNN.build(layout, connectivity)
-    snn.neurons.refractory_ticks = refractory_ticks
 
     rng = np.random.default_rng(seed)
+
+    synapses = build_synapses(layout, specs, rng)
+    synapses.renormalize(layout, layout.population("PREDICTOR"), predictor_renormalize_total)
+    snn = SNN.build(layout, synapses)
+    snn.neurons.refractory_ticks = refractory_ticks
 
     prompt_channel = FeatureInChannel(
         layout.population("PROMPT"),
@@ -352,20 +342,14 @@ def build_turn_taking_experiment(
     stdp = Hebbian(snn, third_factor=rpe, learning_rate=learning_rate)
     homeostatic = InhibitoryPlasticity(snn, target_rate=target_rate)
     background = BackgroundDrive([layout.population("HIDDEN")], rng)
-    # PREDICTOR needs to fire occasionally on its own for STDP eligibility to
-    # have anything to reinforce - its own seed weight stays as low as
-    # REWARD's, so this (not synaptic strength) is what bootstraps it.
-    predictor_background = BackgroundDrive([layout.population("PREDICTOR")], rng, amplitude=0.9, sparsity=0.05)
 
     session = Session(
         snn,
-        # predictor_channel is never forced, so it's read-only (post) - never
-        # in pre, where its default write_value would fight its own activity.
-        pre=[prompt_channel, word_channel, reward_channel, background, predictor_background],
+        pre=[prompt_channel, word_channel, reward_channel, background],
         post=[output_channel, reward_channel, predictor_channel, rpe, stdp, homeostatic],
     )
 
-    return TurnTakingSetup(
+    setup = TurnTakingSetup(
         session,
         prompt_channel,
         word_channel,
@@ -375,22 +359,35 @@ def build_turn_taking_experiment(
         stdp,
         rng,
         cancel_on_interrupt,
-        edges=connectivity.edges,
+        TrialRecorder(),
+        specs=specs,
         prompt_duration=prompt_duration,
     )
+    attach_predictor_diagnostic(setup)
+    return setup
 
 
-def _print_report(seed: int, label: str, stats: list[EpochStats]):
+def _print_report(seed: int, label: str, results: list[tuple[EpochStats, PredictorReport]]):
     print(f"\n[seed={seed} {label}]")
-    print(f"{'epoch':>5} {'turns':>6} {'resp%':>6} {'latency':>8} {'given':>6} {'cancelled':>10} {'w(H->OUT)':>10} {'w(H->H)':>9}")
-    for epoch in stats:
+    print(
+        f"{'epoch':>5} {'turns':>6} {'resp%':>6} {'latency':>8} {'given':>6} {'cancelled':>10} "
+        f"{'w(H->OUT)':>10} {'w(H->H)':>9} {'p_std':>8} {'bias':>8} {'rpe_red':>8} {'disc_p':>8} {'disc_r':>8}"
+    )
+    for epoch, predictor in results:
         latency = f"{epoch.mean_response_latency:.2f}" if epoch.mean_response_latency is not None else "-"
         h_out = epoch.weight_stats.get("HIDDEN_to_OUTPUT", (0, 0, 0))[1]
         h_h = epoch.weight_stats.get("HIDDEN_to_HIDDEN", (0, 0, 0))[1]
+        p_std = f"{predictor.predictor_std:.4f}" if predictor.predictor_std is not None else "-"
+        bias = f"{predictor.rpe_bias:.4f}" if predictor.rpe_bias is not None else "-"
+        rpe_red = f"{predictor.rpe_reduction:.4f}" if predictor.rpe_reduction is not None else "-"
+        disc_p = f"{predictor.discrimination_prompt:.4f}" if predictor.discrimination_prompt is not None else "-"
+        disc_r = f"{predictor.discrimination_response:.4f}" if predictor.discrimination_response is not None else "-"
         print(
-            f"{epoch.index:>5} {epoch.turns:>6} {epoch.response_rate * 100:>5.1f}% {latency:>8} "
-            f"{epoch.rewards_given:>6} {epoch.rewards_cancelled:>10} {h_out:>10.4f} {h_h:>9.4f}"
+            f"{epoch.index:>5} {epoch.trials:>6} {epoch.response_rate * 100:>5.1f}% {latency:>8} "
+            f"{epoch.rewarded:>6} {epoch.cancelled:>10} {h_out:>10.4f} {h_h:>9.4f} {p_std:>8} {bias:>8} {rpe_red:>8} {disc_p:>8} {disc_r:>8}"
         )
+        for warning in predictor.warnings:
+            print(f"      ! predictor: {warning}")
 
 
 if __name__ == "__main__":
