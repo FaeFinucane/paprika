@@ -1,63 +1,84 @@
-"""Deterministic compiled leaky integrate-and-fire network."""
+"""Compiled leaky integrate-and-fire network runtime."""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+import numpy as np
+
+from .adjustments import NetworkAdjustment
 from .connectivity import SparseSynapses
 from .population import Population, PopulationLayout
-import numpy as np
+
 
 @dataclass(frozen=True, slots=True)
 class Spikes:
     values: np.ndarray
     tick: int
+    _fingerprint: str = ""
+
+    def __post_init__(self) -> None:
+        if self.values.ndim != 1 or self.values.dtype != np.bool_:
+            raise ValueError("spikes must be a one-dimensional boolean array")
+        if self.tick < 0:
+            raise ValueError("tick must be non-negative")
 
     def population(self, population: Population[Any]) -> np.ndarray:
         if population.layout_fingerprint != self._fingerprint:
             raise ValueError("population belongs to another layout")
-        
         return self.values[population.bounds]
 
-    _fingerprint: str = ""
 
-    def __post_init__(self):
-        # TODO: How do we ensure values is an array of bool
-        if self.values.ndim != 1 or self.values.dtype != np.bool_:
-            raise ValueError("spike values must be a one-dimensional boolean array")
-        if self.tick < 0:
-            raise ValueError("spike tick must be non-negative")
+@dataclass(frozen=True, slots=True)
+class LIFDynamics:
+    """Shared, fixed dynamics for every ordinary neuron in the simulation."""
+
+    threshold: float = 1.0
+    decay: float = 0.9
+    reset: float = -0.5
+    refractory_ticks: int = 0
+
+    def __post_init__(self) -> None:
+        if (
+            not np.isfinite(self.threshold)
+            or self.threshold <= 0
+            or not np.isfinite(self.decay)
+            or not 0 <= self.decay <= 1
+            or not np.isfinite(self.reset)
+            or self.refractory_ticks < 0
+        ):
+            raise ValueError("invalid shared neuron dynamics")
+
+
+DEFAULT_LIF_DYNAMICS = LIFDynamics()
 
 
 @dataclass
 class LIFNeurons:
-    # True for inhibitory, false for excitatory
-    neuron_types: np.typing.NDArray[np.bool]
-    threshold: float = 1.0
-    decay: float = 0.9
-    reset: float = 0.0
-    refractory_ticks: int = 0
+    count: int
+    dynamics: LIFDynamics = DEFAULT_LIF_DYNAMICS
+    voltage: np.ndarray = field(init=False)
+    refractory: np.ndarray = field(init=False)
 
-    voltage: np.ndarray = field(init = False)
-    refractory: np.ndarray = field(init = False)
-
-    def __post_init__(self):
-        if self.threshold <= 0 or not 0 <= self.decay <= 1 or self.refractory_ticks < 0:
-            raise ValueError("invalid LIF parameters")
-
-        count = self.neuron_types.shape[0]
-        self.voltage = np.zeros(count)
-        self.refractory = np.zeros(count) 
+    def __post_init__(self) -> None:
+        if self.count <= 0:
+            raise ValueError("neuron count must be positive")
+        self.voltage = np.zeros(self.count, dtype=float)
+        self.refractory = np.zeros(self.count, dtype=int)
 
     def step(self, current: np.ndarray) -> np.ndarray:
-        self.voltage[self.refractory > 0] = self.reset
-        self.refractory[self.refractory > 0] -= 1
+        if current.shape != self.voltage.shape or not np.all(np.isfinite(current)):
+            raise ValueError("invalid current")
+        refractory = self.refractory > 0
+        self.voltage[refractory] = self.dynamics.reset
+        self.refractory[refractory] -= 1
         live = self.refractory == 0
-        self.voltage[live] = self.decay * self.voltage[live] + current[live]
-        spikes = live & (self.voltage >= self.threshold)
-        self.voltage[spikes] = self.reset
-        self.refractory[spikes] = self.refractory_ticks
+        self.voltage[live] = self.dynamics.decay * self.voltage[live] + current[live]
+        spikes = live & (self.voltage >= self.dynamics.threshold)
+        self.voltage[spikes] = self.dynamics.reset
+        self.refractory[spikes] = self.dynamics.refractory_ticks
         return spikes
 
 
@@ -66,54 +87,58 @@ class SNN:
     layout: PopulationLayout
     neurons: LIFNeurons
     synapses: SparseSynapses
-    pending_current: np.ndarray
+    next_current: np.ndarray
     tick: int = 0
 
     @staticmethod
-    def build(layout: PopulationLayout, synapses: SparseSynapses):
+    def build(layout: PopulationLayout, synapses: SparseSynapses) -> "SNN":
         return SNN(
             layout,
-            LIFNeurons(layout.neuron_types()),
+            LIFNeurons(layout.total_count),
             synapses,
-            np.zeros(layout.total_count),
+            np.zeros(layout.total_count, dtype=float),
         )
 
-    def step(self, external_current: Mapping[Population[Any], np.ndarray] | None = None):
-        current = self.pending_current.copy()
-        self.pending_current.fill(0)
-        for pop, value in (external_current or {}).items():
+    def step(self, external_current: Mapping[Population[Any], np.ndarray] | None = None) -> Spikes:
+        current = self.next_current.copy()
+        self.next_current.fill(0.0)
+        for population, value in (external_current or {}).items():
             value = np.asarray(value, dtype=float)
-            if pop.layout_fingerprint != self.layout.fingerprint or value.shape != (pop.spec.count,):
+            if (
+                population.layout_fingerprint != self.layout.fingerprint
+                or value.shape != (population.count,)
+                or not np.all(np.isfinite(value))
+            ):
                 raise ValueError("invalid external current")
-            current[pop.bounds] += value
+            current[population.bounds] += value
+
         emitted = self.neurons.step(current)
-        if emitted.any():
-            np.add.at(
-                self.pending_current,
-                self.synapses.target[self.synapses.active],
-                self.synapses.weight[self.synapses.active]
-                * emitted[self.synapses.source[self.synapses.active]],
-            )
+        active = self.synapses.active
+        if emitted.any() and active.any():
+            transmitted = active & emitted[self.synapses.source]
+            if transmitted.any():
+                signed = self.layout.output_sign[self.synapses.source[transmitted]]
+                if np.any(signed == 0):
+                    raise RuntimeError("modulatory neuron has an ordinary projection")
+                np.add.at(
+                    self.next_current,
+                    self.synapses.target[transmitted],
+                    signed * self.synapses.strength[transmitted],
+                )
         self.tick += 1
         return Spikes(emitted.copy(), self.tick, self.layout.fingerprint)
 
-    def apply_weight_delta(self, delta: np.ndarray):
-        delta = np.asarray(delta, dtype=float)
-        if delta.shape != self.synapses.weight.shape or not np.all(np.isfinite(delta)):
-            raise ValueError("invalid weight delta")
-
-        active = self.synapses.active
-        weight = self.synapses.weight
-
-        # TODO: Simplify clipping logic here, we're doing np.clip & np.min/np.max
-        weight[active] = np.clip(
-            weight[active] + delta[active],
-            self.synapses.minimum,
-            self.synapses.maximum,
-        )
-
-        source_inhibitory = self.neurons.neuron_types[self.synapses.source]
-        inhibitory = active & source_inhibitory
-        excitatory = active & ~source_inhibitory
-        weight[inhibitory] = np.minimum(weight[inhibitory], 0.0)
-        weight[excitatory] = np.maximum(weight[excitatory], 0.0)
+    def commit(self, adjustments: Sequence[NetworkAdjustment]) -> None:
+        """Validate and atomically apply accumulated parameter adjustments."""
+        strength_delta = np.zeros_like(self.synapses.strength)
+        strength_mask = np.zeros_like(self.synapses.active)
+        for adjustment in adjustments:
+            if adjustment.strength_delta is not None:
+                assert adjustment.strength_mask is not None
+                delta, mask = self.synapses.validate_strength_delta(
+                    adjustment.strength_delta, adjustment.strength_mask
+                )
+                strength_delta[mask] += delta[mask]
+                strength_mask |= mask
+        if strength_mask.any():
+            self.synapses.apply_strength_delta(strength_delta, strength_mask)

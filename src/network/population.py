@@ -1,140 +1,146 @@
-"""Population specifications and representations."""
+"""Population specifications and their compiled neuron traits."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any, Literal, Sequence
+from typing import Any, Generic, Literal, Sequence, TypeVar
 
 import numpy as np
 
-# TODO: Consider moving population types up a level. Network layer only cares about number of neurons.
-# TODO: Additionally look at ways we could abstract things so we don't need Spec + Population for everything.
-# TODO: Maybe Population[PopulationSpec], with PopulationSpec being an ABC
+OutputKind = Literal["excitatory", "inhibitory", "modulatory"]
+DopamineResponse = Literal["aligned", "opposed", "neutral"]
 
-@dataclass(frozen=True)
+
+@dataclass(frozen=True, slots=True)
 class NeuronPopulationSpec:
+    """A homogeneous ordinary-neuron population.
+
+    Functional assemblies with mixed traits are represented by several named
+    populations. This keeps transmitter sign and plasticity ownership visible
+    in circuit construction rather than hidden in an offset convention.
+    """
+
     name: str
     neuron_count: int
-    # Proportion (0-1) of this population's neurons that are inhibitory.
-    # Inhibitory neurons connect only to inhibitory synapses, see Dale's Principle.
-    inhibitory: float = 0.0
+    output: OutputKind = "excitatory"
+    dopamine_response: DopamineResponse = "neutral"
     kind: Literal["neurons"] = "neurons"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.neuron_count <= 0:
-            raise ValueError("invalid neuron population")
-        if not 0 <= self.inhibitory <= 1:
-            raise ValueError("inhibitory must be a proportion between 0 and 1")
+            raise ValueError("neuron_count must be positive")
+        if self.output not in ("excitatory", "inhibitory", "modulatory"):
+            raise ValueError("invalid output kind")
+        if self.dopamine_response not in ("aligned", "opposed", "neutral"):
+            raise ValueError("invalid dopamine response")
 
     @property
-    def count(self):
+    def count(self) -> int:
         return self.neuron_count
 
-    @property
-    def inhibitory_count(self) -> int:
-        return round(self.neuron_count * self.inhibitory)
 
-
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class FeaturePopulationSpec:
     name: str
     features: tuple[str, ...]
     feature_width: int
     kind: Literal["features"] = "features"
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if (
             not self.features
             or len(set(self.features)) != len(self.features)
-            or any(not x for x in self.features)
+            or any(not value for value in self.features)
             or self.feature_width <= 0
         ):
             raise ValueError("invalid feature population")
 
     @property
-    def count(self):
+    def count(self) -> int:
         return len(self.features) * self.feature_width
 
     @property
-    def inhibitory_count(self) -> int:
-        return 0
+    def output(self) -> OutputKind:
+        return "excitatory"
 
-    def feature_bounds(self, feature: str) -> slice[int]:
+    @property
+    def dopamine_response(self) -> DopamineResponse:
+        return "neutral"
+
+    def feature_bounds(self, feature: str) -> slice:
         index = self.features.index(feature)
-        return slice(
-            index * self.feature_width,
-            (index + 1) * self.feature_width,
-        )
+        return slice(index * self.feature_width, (index + 1) * self.feature_width)
+
+
+PopulationSpec = NeuronPopulationSpec | FeaturePopulationSpec
+T = TypeVar("T", bound=PopulationSpec)
+
 
 @dataclass(frozen=True, slots=True)
-class NumericPopulationSpec:
-    name: str
-    positive: int
-    negative: int
-    kind: Literal["numeric"] = "numeric"
-
-    @property
-    def count(self):
-        return self.positive + self.negative
-
-    @property
-    def inhibitory_count(self) -> int:
-        return 0
-
-# Population = NeuronPopulation | FeaturePopulation | NumericPopulation
-PopulationSpec = NeuronPopulationSpec | FeaturePopulationSpec | NumericPopulationSpec
-
-@dataclass(frozen=True, slots=True)
-class Population[T: PopulationSpec]:
+class Population(Generic[T]):
     spec: T
     start: int
     layout_fingerprint: str
 
     @property
-    def bounds(self) -> slice[int]:
+    def bounds(self) -> slice:
         return slice(self.start, self.start + self.spec.count)
 
     @property
     def count(self) -> int:
         return self.spec.count
 
-# TODO: Consider build returning a dict of populations directly, to look up by name, as well as the layout itself.
+
 @dataclass(frozen=True)
 class PopulationLayout:
     populations: tuple[Population[Any], ...]
     total_count: int
     fingerprint: str
+    output_kinds: np.ndarray
+    dopamine_response_sign: np.ndarray
 
     @staticmethod
-    def build(specs: Sequence[NeuronPopulationSpec | FeaturePopulationSpec | NumericPopulationSpec]):
+    def build(specs: Sequence[PopulationSpec]) -> "PopulationLayout":
         if not specs:
             raise ValueError("at least one population is required")
-        
-        if len({s.name for s in specs}) != len(specs):
+        if len({spec.name for spec in specs}) != len(specs):
             raise ValueError("population names must be unique")
-        
-        raw = repr(tuple(specs)).encode()
-        fp = sha256(raw).hexdigest()
 
+        fingerprint = sha256(repr(tuple(specs)).encode()).hexdigest()
+        populations: list[Population[Any]] = []
         offset = 0
-        pops: Sequence[Population[Any]] = []
         for spec in specs:
-            bounds = slice(offset, offset + spec.count)
-            offset = bounds.stop
-            pops.append(Population(spec, bounds.start, fp))
-        return PopulationLayout(tuple(pops), offset, fp)
+            populations.append(Population(spec, offset, fingerprint))
+            offset += spec.count
+
+        output_kinds = np.empty(offset, dtype="U11")
+        response = np.zeros(offset, dtype=float)
+        response_values = {"aligned": 1.0, "opposed": -1.0, "neutral": 0.0}
+        for population in populations:
+            bounds = population.bounds
+            spec = population.spec
+            output_kinds[bounds] = spec.output
+            response[bounds] = response_values[spec.dopamine_response]
+
+        return PopulationLayout(
+            tuple(populations),
+            offset,
+            fingerprint,
+            output_kinds,
+            response,
+        )
 
     def population(self, name: str) -> Population[Any]:
-        for p in self.populations:
-            if p.spec.name == name:
-                return p
+        for population in self.populations:
+            if population.spec.name == name:
+                return population
         raise KeyError(f"unknown population {name!r}")
 
-    def neuron_types(self) -> np.ndarray[tuple[int],np.dtype[np.bool]]:
-        """Boolean mask of whether neurons are excitatory (false) or inhibitory (true)"""
-        mask = np.zeros(self.total_count, dtype=bool)
-        for p in self.populations:
-            if p.spec.inhibitory_count:
-                mask[p.bounds.stop - p.spec.inhibitory_count:p.bounds.stop] = True
-        return mask
+    @property
+    def output_sign(self) -> np.ndarray:
+        """Conventional-current sign. Modulatory neurons have no ordinary sign."""
+        sign = np.zeros(self.total_count, dtype=float)
+        sign[self.output_kinds == "excitatory"] = 1.0
+        sign[self.output_kinds == "inhibitory"] = -1.0
+        return sign

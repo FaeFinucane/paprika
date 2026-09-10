@@ -1,5 +1,10 @@
-from .hebbian import Hebbian
-from .inhibitory import InhibitoryPlasticity
-from .reward import RPE, RewardSignal
+from .hebbian import DopamineSTDP, ModulatorySignal
+from .homeostasis import SynapticScaling
+from .inhibitory import InhibitoryHomeostasis
 
-__all__ = ["Hebbian", "InhibitoryPlasticity", "RPE", "RewardSignal"]
+__all__ = [
+    "DopamineSTDP",
+    "InhibitoryHomeostasis",
+    "ModulatorySignal",
+    "SynapticScaling",
+]

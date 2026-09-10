@@ -1,0 +1,62 @@
+import numpy as np
+import pytest
+from src.interaction.rates import DopamineReadout, PopulationRate, UnipolarRateInput
+from src.network.population import NeuronPopulationSpec, PopulationLayout
+from src.network.snn import Spikes
+
+pytestmark = pytest.mark.unit
+
+
+def population():
+    return PopulationLayout.build((NeuronPopulationSpec("x", 4),)).populations[0]
+
+
+def spikes(pop, active):
+    values = np.zeros(pop.spec.count, dtype=bool)
+    values[:active] = True
+    return Spikes(values, 1, pop.layout_fingerprint)
+
+
+def test_rate_input_is_bounded_and_emits_for_exact_duration():
+    pop = population()
+    source = UnipolarRateInput(pop, np.random.default_rng(2), duration=2)
+    source.write(0.75)
+    assert source.produce().drives[pop].shape == (4,)
+    assert source.produce().drives[pop].shape == (4,)
+    assert source.produce().drives == {}
+    with np.testing.assert_raises(ValueError):
+        source.write(1.1)
+
+
+def test_rate_input_clear_and_reset_cancel_pending_drive():
+    pop = population()
+    source = UnipolarRateInput(pop, duration=3)
+    source.write(1.0)
+    source.clear()
+    assert source.produce().drives == {}
+    source.write(1.0)
+    source.reset()
+    assert source.produce().drives == {}
+
+
+def test_population_rate_decodes_monotonically_and_resets():
+    pop = population()
+    decoder = PopulationRate(pop, decay=0.5)
+    decoder.observe(spikes(pop, 1))
+    low = decoder.rate
+    decoder.observe(spikes(pop, 4))
+    high = decoder.rate
+    assert 0.0 < low < high <= 1.0
+    decoder.reset()
+    assert decoder.rate == 0.0
+
+
+def test_dopamine_baseline_and_symmetric_deadzone():
+    pop = population()
+    rate = PopulationRate(pop, decay=0.0)
+    dopamine = DopamineReadout(rate, baseline=0.5, deadzone=0.1)
+    assert dopamine.decode(0.5) == 0.0
+    assert dopamine.decode(0.55) == 0.0
+    assert np.isclose(dopamine.decode(0.8), -dopamine.decode(0.2))
+    zero_baseline = DopamineReadout(rate, baseline=0.0, deadzone=0.1)
+    assert zero_baseline.decode(0.0) == 0.0
