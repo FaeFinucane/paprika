@@ -33,8 +33,7 @@ class Drives:
 class DriveSource(Protocol):
     """Produces external current before a network tick."""
 
-    def produce(self) -> Drives:
-        ...
+    def produce(self) -> Drives: ...
 
 
 @runtime_checkable
@@ -44,32 +43,28 @@ class CurrentDrive(DriveSource, Protocol):
     population: Population[Any]
 
     @property
-    def current(self) -> float:
-        ...
+    def current(self) -> float: ...
 
 
 @runtime_checkable
 class Observer(Protocol):
     """Observes the spikes emitted by a completed network tick."""
 
-    def observe(self, spikes: Spikes) -> None:
-        ...
+    def observe(self, spikes: Spikes) -> None: ...
 
 
 @runtime_checkable
 class SpikeAdaptation(Observer, Protocol):
     """Observes spikes, then proposes future parameter changes."""
 
-    def propose(self, snn: SNN) -> NetworkAdjustment:
-        ...
+    def propose(self, snn: SNN) -> NetworkAdjustment: ...
 
 
 @runtime_checkable
 class StatefulAdaptation(SpikeAdaptation, Protocol):
     """An adaptation with plugin-owned state to finalize at tick commit."""
 
-    def commit_state(self) -> None:
-        ...
+    def commit_state(self) -> None: ...
 
 
 Hook: TypeAlias = DriveSource | Observer | SpikeAdaptation

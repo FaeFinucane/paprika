@@ -1,9 +1,7 @@
-import numpy as np
 import pytest
+from src.builder import NetworkBuilder
 from src.interaction.plugins import Drives
 from src.network.adjustments import NetworkAdjustment
-from src.network.definition import NetworkDefinition
-from src.network.population import NeuronPopulationSpec
 from src.network.snn import SNN, Spikes
 from src.session import Session
 
@@ -34,9 +32,9 @@ class _Adaptation:
 
 
 def test_session_observes_then_commits_all_adaptations_from_one_registration_list():
-    snn = NetworkDefinition((NeuronPopulationSpec("POPULATION", 1),), ()).compile(
-        np.random.default_rng(1)
-    )
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 1)
+    snn = builder.compile(1).snn
     events: list[str] = []
     session = Session.build(
         snn,
@@ -49,9 +47,9 @@ def test_session_observes_then_commits_all_adaptations_from_one_registration_lis
 
 
 def test_session_can_freeze_all_adaptation_lifecycle_steps():
-    snn = NetworkDefinition((NeuronPopulationSpec("POPULATION", 1),), ()).compile(
-        np.random.default_rng(1)
-    )
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 1)
+    snn = builder.compile(1).snn
     events: list[str] = []
     session = Session.build(snn, [_Drive(events), _Adaptation(snn, events, 0.1)])
 

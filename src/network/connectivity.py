@@ -175,7 +175,9 @@ class SparseSynapses:
     def projection_mask(self, name: str) -> np.ndarray:
         return self.active & (self.projection == name)
 
-    def validate_strength_delta(self, delta: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    def validate_strength_delta(
+        self, delta: np.ndarray, mask: np.ndarray
+    ) -> tuple[np.ndarray, np.ndarray]:
         delta = np.asarray(delta, dtype=float)
         if delta.shape != self.strength.shape or not np.all(np.isfinite(delta)):
             raise ValueError("invalid strength delta")

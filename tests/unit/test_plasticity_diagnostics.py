@@ -1,10 +1,8 @@
-import numpy as np
 import pytest
+from src.builder import NetworkBuilder
 from src.diagnostics import inspect_dopamine_eligibility
 from src.interaction.plasticity import DopamineSTDP
-from src.network.connectivity import ConnectionSpec, FanOutSpec, StrengthSpec
-from src.network.definition import NetworkDefinition
-from src.network.population import NeuronPopulationSpec
+from src.network.connectivity import FanOutSpec, StrengthSpec
 
 
 class _Signal:
@@ -12,14 +10,11 @@ class _Signal:
 
 
 def test_eligibility_summary_reports_current_proposed_delta() -> None:
-    definition = NetworkDefinition(
-        (
-            NeuronPopulationSpec("SOURCE", 1),
-            NeuronPopulationSpec("TARGET", 1, dopamine_response="aligned"),
-        ),
-        (ConnectionSpec("SOURCE", "TARGET", FanOutSpec(1), StrengthSpec(0.2), "dopamine_stdp"),),
-    )
-    snn = definition.compile(np.random.default_rng(1))
+    builder = NetworkBuilder()
+    builder.add_population("SOURCE", 1)
+    builder.add_population("TARGET", 1, dopamine_response="aligned")
+    builder.connect("SOURCE", "TARGET", FanOutSpec(1), StrengthSpec(0.2), "dopamine_stdp")
+    snn = builder.compile(1).snn
     rule = DopamineSTDP(snn, _Signal(), learning_rate=0.1)
     rule.eligibility[:] = 0.4
 

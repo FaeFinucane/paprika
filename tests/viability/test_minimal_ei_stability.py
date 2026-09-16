@@ -2,14 +2,14 @@
 
 import numpy as np
 import pytest
+from src.builder import NetworkBuilder
 from src.diagnostics import NetworkTrace, inspect_network
 from src.interaction.drives import HomeostaticDrive
 from src.interaction.plasticity.homeostasis import SynapticScaling
 from src.interaction.plasticity.inhibitory import InhibitoryHomeostasis
 from src.interaction.rates import UnipolarRateInput
-from src.network.connectivity import ConnectionSpec, FanInSpec, FanOutSpec, StrengthSpec
-from src.network.definition import NetworkDefinition
-from src.network.population import FeaturePopulationSpec, NeuronPopulationSpec, Population
+from src.network.connectivity import FanInSpec, FanOutSpec, StrengthSpec
+from src.network.population import NeuronPopulationSpec, Population
 from src.network.snn import SNN
 from src.session import Session
 
@@ -122,36 +122,26 @@ def _minimal_ei_system(
     Population[NeuronPopulationSpec],
     tuple[HomeostaticDrive, HomeostaticDrive],
 ]:
-    definition = NetworkDefinition(
-        populations=(
-            NeuronPopulationSpec("EXCITATORY", 64),
-            NeuronPopulationSpec("INHIBITORY", 16, output="inhibitory"),
-        ),
-        connections=(
-            ConnectionSpec(
-                "EXCITATORY",
-                "EXCITATORY",
-                FanInSpec(8),
-                StrengthSpec(0.10, maximum=0.40),
-                learning="homeostatic",
-                scalable=True,
-            ),
-            ConnectionSpec(
-                "EXCITATORY",
-                "INHIBITORY",
-                FanInSpec(12),
-                StrengthSpec(0.15, maximum=0.50),
-            ),
-            ConnectionSpec(
-                "INHIBITORY",
-                "EXCITATORY",
-                FanInSpec(16),
-                StrengthSpec(0.20, maximum=0.80),
-                learning="inhibitory_homeostatic",
-            ),
-        ),
+    builder = NetworkBuilder()
+    builder.add_population("EXCITATORY", 64)
+    builder.add_population("INHIBITORY", 16, output="inhibitory")
+    builder.connect(
+        "EXCITATORY",
+        "EXCITATORY",
+        FanInSpec(8),
+        StrengthSpec(0.10, maximum=0.40),
+        learning="homeostatic",
+        scalable=True,
     )
-    snn = definition.compile(np.random.default_rng(seed))
+    builder.connect("EXCITATORY", "INHIBITORY", FanInSpec(12), StrengthSpec(0.15, maximum=0.50))
+    builder.connect(
+        "INHIBITORY",
+        "EXCITATORY",
+        FanInSpec(16),
+        StrengthSpec(0.20, maximum=0.80),
+        learning="inhibitory_homeostatic",
+    )
+    snn = builder.compile(seed).snn
     excitatory = snn.layout.population("EXCITATORY")
     inhibitory = snn.layout.population("INHIBITORY")
     excitatory_drive = HomeostaticDrive(
@@ -193,31 +183,22 @@ def _ei_transmission_system(
     seed: int,
 ) -> tuple[SNN, Session, UnipolarRateInput, UnipolarRateInput, Population[NeuronPopulationSpec]]:
     """Build a minimal feed-forward-through-recurrent-E/I signal path."""
-    definition = NetworkDefinition(
-        populations=(
-            FeaturePopulationSpec("INPUT_A", ("A",), 8),
-            FeaturePopulationSpec("INPUT_B", ("B",), 8),
-            NeuronPopulationSpec("EXCITATORY", 64),
-            NeuronPopulationSpec("INHIBITORY", 16, output="inhibitory"),
-            NeuronPopulationSpec("OUTPUT", 32),
-        ),
-        connections=(
-            # Equivalent sparse input channels seed independently sampled E
-            # assemblies. There is intentionally no INPUT -> OUTPUT shortcut.
-            ConnectionSpec(
-                "INPUT_A", "EXCITATORY", FanOutSpec(6, target_neurons=16), StrengthSpec(0.30)
-            ),
-            ConnectionSpec(
-                "INPUT_B", "EXCITATORY", FanOutSpec(6, target_neurons=16), StrengthSpec(0.30)
-            ),
-            ConnectionSpec("EXCITATORY", "EXCITATORY", FanInSpec(8), StrengthSpec(0.10)),
-            ConnectionSpec("EXCITATORY", "INHIBITORY", FanInSpec(12), StrengthSpec(0.15)),
-            ConnectionSpec("INHIBITORY", "EXCITATORY", FanInSpec(16), StrengthSpec(0.20)),
-            ConnectionSpec("EXCITATORY", "OUTPUT", FanInSpec(16), StrengthSpec(0.18)),
-        ),
-    )
+    builder = NetworkBuilder()
+    builder.add_feature_population("INPUT_A", ("A",), width=8)
+    builder.add_feature_population("INPUT_B", ("B",), width=8)
+    builder.add_population("EXCITATORY", 64)
+    builder.add_population("INHIBITORY", 16, output="inhibitory")
+    builder.add_population("OUTPUT", 32)
+    # Equivalent sparse input channels seed independently sampled E assemblies.
+    # There is intentionally no INPUT -> OUTPUT shortcut.
+    builder.connect("INPUT_A", "EXCITATORY", FanOutSpec(6, target_neurons=16), StrengthSpec(0.30))
+    builder.connect("INPUT_B", "EXCITATORY", FanOutSpec(6, target_neurons=16), StrengthSpec(0.30))
+    builder.connect("EXCITATORY", "EXCITATORY", FanInSpec(8), StrengthSpec(0.10))
+    builder.connect("EXCITATORY", "INHIBITORY", FanInSpec(12), StrengthSpec(0.15))
+    builder.connect("INHIBITORY", "EXCITATORY", FanInSpec(16), StrengthSpec(0.20))
+    builder.connect("EXCITATORY", "OUTPUT", FanInSpec(16), StrengthSpec(0.18))
     rng = np.random.default_rng(seed)
-    snn = definition.compile(rng)
+    snn = builder.compile(seed).snn
     input_a = UnipolarRateInput(snn.layout.population("INPUT_A"), rng)
     input_b = UnipolarRateInput(snn.layout.population("INPUT_B"), rng)
     excitatory = snn.layout.population("EXCITATORY")

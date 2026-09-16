@@ -1,17 +1,16 @@
 import numpy as np
 import pytest
+from src.builder import NetworkBuilder
 from src.interaction.drives import HomeostaticDrive
-from src.network.definition import NetworkDefinition
-from src.network.population import NeuronPopulationSpec
 from src.network.snn import Spikes
 
 pytestmark = pytest.mark.unit
 
 
 def test_homeostatic_drive_moves_toward_its_target_and_respects_bounds():
-    snn = NetworkDefinition((NeuronPopulationSpec("POPULATION", 4),), ()).compile(
-        np.random.default_rng(1)
-    )
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 4)
+    snn = builder.compile(1).snn
     population = snn.layout.population("POPULATION")
     homeostasis = HomeostaticDrive(
         population,

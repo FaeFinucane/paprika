@@ -1,7 +1,6 @@
 import numpy as np
 import pytest
-from src.network.definition import NetworkDefinition
-from src.network.population import NeuronPopulationSpec
+from src.builder import NetworkBuilder
 
 from tests.support.perturbations import (
     add_membrane_voltage,
@@ -14,9 +13,9 @@ pytestmark = pytest.mark.unit
 
 
 def test_perturbations_change_only_transient_neuron_state():
-    snn = NetworkDefinition((NeuronPopulationSpec("POPULATION", 4),), ()).compile(
-        np.random.default_rng(1)
-    )
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 4)
+    snn = builder.compile(1).snn
     population = snn.layout.population("POPULATION")
     snn.next_current[:] = 0.3
     initial_strengths = snn.synapses.strength.copy()
