@@ -17,7 +17,7 @@ from ..interaction.drives import HomeostaticDrive, TonicDrive
 from ..interaction.plasticity import DopamineSTDP, InhibitoryHomeostasis
 from ..interaction.plasticity.homeostasis import SynapticScaling
 from ..interaction.plugins import Drives, DriveSource, Hook
-from ..interaction.rates import DopamineReadout, PopulationRate, UnipolarRateInput
+from ..interaction.rates import DopamineReadout, PopulationRate, RatePatternInput, UnipolarRateInput
 from ..interaction.td import TDComparison, TemporalDifferenceComparator
 from ..network.connectivity import (
     ConnectionSpec,
@@ -40,7 +40,7 @@ class TDPulse(DriveSource):
 
     population: Population[Any]
     gain: float = 1.0
-    duration: int = 3
+    duration: int = 10
     _value: float = 0.0
     _remaining: int = 0
 
@@ -69,7 +69,7 @@ class DopamineCircuit:
     populations: dict[str, Population[Any]]
     reward_positive: UnipolarRateInput
     reward_negative: UnipolarRateInput
-    state_input: UnipolarRateInput
+    state_input: RatePatternInput
     value_positive_rate: PopulationRate
     value_negative_rate: PopulationRate
     dopamine_rate: PopulationRate
@@ -78,15 +78,22 @@ class DopamineCircuit:
     comparator: TemporalDifferenceComparator
     td_pulse: TDPulse
     gamma: float
+    reward_rate_scale: float
 
-    def deliver_reward(self, value: float, duration: int = 3) -> None:
+    def deliver_reward(self, value: float, duration: int | None = None) -> None:
         """Route signed environment reward into exactly one unipolar input."""
         if not np.isfinite(value) or not -1.0 <= value <= 1.0:
             raise ValueError("reward must be finite and in [-1, 1]")
+        duration = self.td_pulse.duration if duration is None else duration
+        encoded_rate = abs(value) * self.reward_rate_scale
         if value >= 0:
-            self.reward_positive.write(value, duration)
+            self.reward_positive.write(encoded_rate, duration)
         else:
-            self.reward_negative.write(-value, duration)
+            self.reward_negative.write(encoded_rate, duration)
+
+    def deliver_state(self, pattern: np.ndarray, duration: int | None = None) -> None:
+        """Drive an arbitrary unipolar rate pattern over ``STATE``."""
+        self.state_input.write(pattern, duration)
 
     def transition(
         self,
@@ -107,7 +114,7 @@ class DopamineCircuit:
             self.gamma,
             transition_id=transition_id,
         )
-        self.deliver_reward(reward, duration or self.td_pulse.duration)
+        self.deliver_reward(reward, duration)
         # Reward and current value are carried by fixed neural paths. The
         # reference pulse supplies only -V_positive(previous) +
         # V_negative(previous), until the transition-gated neural memory
@@ -132,41 +139,64 @@ def build_dopamine_circuit(
     gamma: float = 0.95,
     hidden_size: int = 48,
     value_size: int = 16,
-    dopamine_size: int = 16,
+    dopamine_size: int = 32,
+    value_signal_span: float = 0.17,
     enable_dopamine_learning: bool = True,
 ) -> DopamineCircuit:
     """Build the smallest complete clean-break dopamine architecture."""
-    if not 0 <= gamma <= 1 or min(hidden_size, value_size, dopamine_size) <= 0:
+    if (
+        not 0 <= gamma <= 1
+        or min(hidden_size, dopamine_size) <= 0
+        or value_size < 3
+        or not 0.0 < value_signal_span <= 1.0
+    ):
         raise ValueError("invalid circuit dimensions or discount")
     hidden_inhibitory = max(4, hidden_size // 4)
-    definition = NetworkDefinition(
-        (
-            FeaturePopulationSpec("STATE", ("STATE",), 8),
-            NeuronPopulationSpec("HIDDEN_ALIGNED", hidden_size, dopamine_response="aligned"),
-            NeuronPopulationSpec("HIDDEN_OPPOSED", hidden_size, dopamine_response="opposed"),
-            NeuronPopulationSpec("HIDDEN_NEUTRAL", hidden_size),
-            NeuronPopulationSpec("HIDDEN_INHIBITORY", hidden_inhibitory, output="inhibitory"),
-            NeuronPopulationSpec("POSITIVE_VALUE", value_size, dopamine_response="aligned"),
-            NeuronPopulationSpec(
-                "NEGATIVE_VALUE",
-                value_size,
-                output="inhibitory",
-                dopamine_response="opposed",
-            ),
-            NeuronPopulationSpec("REWARD_POSITIVE", value_size),
-            NeuronPopulationSpec("REWARD_NEGATIVE", value_size, output="inhibitory"),
-            NeuronPopulationSpec("DOPAMINE", dopamine_size, output="modulatory"),
+    population_specs: list[NeuronPopulationSpec | FeaturePopulationSpec] = [
+        FeaturePopulationSpec("STATE", ("STATE",), 16),
+        NeuronPopulationSpec("HIDDEN_ALIGNED", hidden_size, dopamine_response="aligned"),
+        NeuronPopulationSpec("HIDDEN_OPPOSED", hidden_size, dopamine_response="opposed"),
+        NeuronPopulationSpec("HIDDEN_NEUTRAL", hidden_size),
+        NeuronPopulationSpec("HIDDEN_INHIBITORY", hidden_inhibitory, output="inhibitory"),
+        NeuronPopulationSpec("POSITIVE_VALUE", value_size, dopamine_response="aligned"),
+        NeuronPopulationSpec(
+            "NEGATIVE_VALUE", value_size, output="inhibitory", dopamine_response="opposed"
         ),
-        (),
-    )
+        NeuronPopulationSpec("REWARD_POSITIVE", value_size),
+        NeuronPopulationSpec("REWARD_NEGATIVE", value_size, output="inhibitory"),
+        NeuronPopulationSpec("DOPAMINE", dopamine_size, output="modulatory"),
+    ]
+    definition = NetworkDefinition(tuple(population_specs), ())
+    # One provisional sparse rate convention is shared by value and reward.
+    # The reward population mirrors value_size and maps external reward into
+    # this signal span rather than treating a scalar reward as a raw rate.
+    value_baseline_rate = 0.03
+    # Preserve the former full-scale dopamine-current budget while encoding a
+    # reward in the same sparse span as value. The resulting dense sampling is
+    # deliberately measured by the comparator viability test below.
+    comparator_current_budget = 6 * 0.32
+    comparator_fanin = value_size - 2
+    comparator_strength = comparator_current_budget / (comparator_fanin * value_signal_span)
+
+    state_to_hidden = StrengthSpec(0.25, 0.02, maximum=0.8)
     learned = StrengthSpec(0.12, 0.02, maximum=0.8)
     fixed = StrengthSpec(0.30, 0.02, maximum=0.8)
-    discounted = StrengthSpec(0.30 * gamma, 0.02, maximum=0.8)
+    comparator = StrengthSpec(comparator_strength, 0.02, maximum=0.8)
+    discounted = StrengthSpec(comparator_strength * gamma, 0.02, maximum=0.8)
     inhibitory = StrengthSpec(0.22, 0.02, maximum=0.8)
     specs: list[ConnectionSpec] = []
     hidden_exc = ("HIDDEN_ALIGNED", "HIDDEN_OPPOSED", "HIDDEN_NEUTRAL")
     for target in hidden_exc:
-        specs.append(ConnectionSpec("STATE", target, FanOutSpec(6), learned, "dopamine_stdp", True))
+        specs.append(
+            ConnectionSpec(
+                "STATE",
+                target,
+                FanOutSpec(6, target_neurons=12),
+                state_to_hidden,
+                "dopamine_stdp",
+                True,
+            )
+        )
     for source in hidden_exc:
         for target in hidden_exc:
             specs.append(
@@ -179,40 +209,49 @@ def build_dopamine_circuit(
         specs.append(
             ConnectionSpec(source, "NEGATIVE_VALUE", FanOutSpec(4), learned, "dopamine_stdp", True)
         )
-    for target in (*hidden_exc, "POSITIVE_VALUE", "NEGATIVE_VALUE"):
+    for target in hidden_exc:
         specs.append(
             ConnectionSpec(
-                "HIDDEN_INHIBITORY", target, FanOutSpec(6), inhibitory, "inhibitory_homeostatic"
+                "HIDDEN_INHIBITORY",
+                target,
+                FanOutSpec(6),
+                inhibitory,
+                "inhibitory_homeostatic",
             )
         )
-
     # Fixed comparator paths use source transmitter sign directly.
     specs.extend(
         (
-            ConnectionSpec("REWARD_POSITIVE", "DOPAMINE", FanInSpec(6), fixed),
-            ConnectionSpec("REWARD_NEGATIVE", "DOPAMINE", FanInSpec(6), inhibitory),
-            ConnectionSpec("POSITIVE_VALUE", "DOPAMINE", FanInSpec(6), discounted),
-            ConnectionSpec("NEGATIVE_VALUE", "DOPAMINE", FanInSpec(6), discounted),
+            ConnectionSpec("REWARD_POSITIVE", "DOPAMINE", FanInSpec(comparator_fanin), comparator),
+            ConnectionSpec("REWARD_NEGATIVE", "DOPAMINE", FanInSpec(comparator_fanin), comparator),
+            ConnectionSpec("POSITIVE_VALUE", "DOPAMINE", FanInSpec(comparator_fanin), discounted),
+            ConnectionSpec("NEGATIVE_VALUE", "DOPAMINE", FanInSpec(comparator_fanin), discounted),
         )
     )
-    rng = np.random.default_rng(seed)
+    topology_rng = np.random.default_rng(seed)
+    state_rng = np.random.default_rng([seed, 1])
+    reward_positive_rng = np.random.default_rng([seed, 2])
+    reward_negative_rng = np.random.default_rng([seed, 3])
+    tonic_rng = np.random.default_rng([seed, 4])
     definition = NetworkDefinition(definition.populations, tuple(specs))
-    snn = definition.compile(rng)
+    snn = definition.compile(topology_rng)
     populations = {population.spec.name: population for population in snn.layout.populations}
-    state_input = UnipolarRateInput(populations["STATE"], rng)
-    reward_positive = UnipolarRateInput(populations["REWARD_POSITIVE"], rng)
-    reward_negative = UnipolarRateInput(populations["REWARD_NEGATIVE"], rng)
+    state_input = RatePatternInput(populations["STATE"], state_rng)
+    reward_positive = UnipolarRateInput(populations["REWARD_POSITIVE"], reward_positive_rng)
+    reward_negative = UnipolarRateInput(populations["REWARD_NEGATIVE"], reward_negative_rng)
     positive_rate = PopulationRate(populations["POSITIVE_VALUE"], decay=0.9)
     negative_rate = PopulationRate(populations["NEGATIVE_VALUE"], decay=0.9)
-    dopamine_rate = PopulationRate(populations["DOPAMINE"], decay=0.8)
-    dopamine = DopamineReadout(dopamine_rate, baseline=0.25, deadzone=0.01)
-    td_pulse = TDPulse(populations["DOPAMINE"], gain=1.0)
-    stdp = DopamineSTDP(snn, dopamine, learning_rate=0.002, deadzone=0.01)
+    dopamine_rate = PopulationRate(populations["DOPAMINE"], decay=0.9)
+    dopamine = DopamineReadout(dopamine_rate, baseline=0.25, deadzone=0.04)
+    td_pulse = TDPulse(populations["DOPAMINE"], gain=comparator_fanin * comparator_strength)
+    # DopamineReadout already rejects tonic baseline variation. Applying a
+    # second STDP deadzone would discard the small phasic signal that remains.
+    stdp = DopamineSTDP(snn, dopamine, learning_rate=0.002)
     components: list[Hook] = [
         state_input,
         reward_positive,
         reward_negative,
-        TonicDrive(populations["DOPAMINE"], current=0.40),
+        TonicDrive(populations["DOPAMINE"], current=0.42, heterogeneity=0.06, rng=tonic_rng),
         td_pulse,
         positive_rate,
         negative_rate,
@@ -226,11 +265,9 @@ def build_dopamine_circuit(
         HomeostaticDrive(populations["HIDDEN_ALIGNED"], 0.04),
         HomeostaticDrive(populations["HIDDEN_OPPOSED"], 0.04),
         HomeostaticDrive(populations["HIDDEN_NEUTRAL"], 0.04),
-        HomeostaticDrive(populations["POSITIVE_VALUE"], 0.03),
-        HomeostaticDrive(populations["NEGATIVE_VALUE"], 0.03),
-        HomeostaticDrive(
-            populations["DOPAMINE"], 0.25, learning_rate=0.00001, initial_current=0.0
-        ),
+        HomeostaticDrive(populations["POSITIVE_VALUE"], value_baseline_rate),
+        HomeostaticDrive(populations["NEGATIVE_VALUE"], value_baseline_rate),
+        HomeostaticDrive(populations["DOPAMINE"], 0.25, learning_rate=0.00001, initial_current=0.0),
         SynapticScaling(snn, populations["HIDDEN_ALIGNED"], 0.04),
         SynapticScaling(snn, populations["HIDDEN_OPPOSED"], 0.04),
         SynapticScaling(snn, populations["HIDDEN_NEUTRAL"], 0.04),
@@ -252,4 +289,5 @@ def build_dopamine_circuit(
         TemporalDifferenceComparator(),
         td_pulse,
         gamma,
+        value_signal_span,
     )

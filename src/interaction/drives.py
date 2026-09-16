@@ -15,17 +15,27 @@ from .plugins import Drives, DriveSource, StatefulAdaptation
 
 @dataclass
 class TonicDrive(DriveSource):
-    """A named constant current source for one population."""
+    """A named tonic current source with optional fixed cell diversity."""
 
     population: Population[Any]
     current: float
+    heterogeneity: float = 0.0
+    rng: np.random.Generator = field(default_factory=np.random.default_rng)
+    _currents: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not np.isfinite(self.current):
-            raise ValueError("tonic current must be finite")
+        if (
+            not np.isfinite(self.current)
+            or not np.isfinite(self.heterogeneity)
+            or self.heterogeneity < 0
+        ):
+            raise ValueError("tonic current must be finite and heterogeneity non-negative")
+        variation = self.rng.normal(0.0, self.heterogeneity, self.population.count)
+        variation -= float(np.mean(variation))
+        self._currents = self.current + variation
 
     def produce(self) -> Drives:
-        return Drives({self.population: np.full(self.population.count, self.current)})
+        return Drives({self.population: self._currents})
 
 
 @dataclass

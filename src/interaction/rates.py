@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike
 
 from ..network.population import Population
 from ..network.snn import Spikes
@@ -63,6 +64,49 @@ class UnipolarRateInput(DriveSource):
         self._remaining -= 1
         if self._remaining == 0:
             self._rate = None
+        return Drives({self.population: values})
+
+
+@dataclass
+class RatePatternInput(DriveSource):
+    """Bernoulli rate drive for an arbitrary unipolar population pattern."""
+
+    population: Population[Any]
+    rng: np.random.Generator = field(default_factory=np.random.default_rng)
+    duration: int = 1
+
+    _rates: np.ndarray | None = field(default=None, init=False, repr=False)
+    _remaining: int = field(default=0, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.duration <= 0:
+            raise ValueError("duration must be positive")
+
+    def write(self, rates: ArrayLike, duration: int | None = None) -> None:
+        """Set per-neuron rates in ``[0, 1]`` for a bounded duration."""
+        values = np.asarray(rates, dtype=float)
+        ticks = self.duration if duration is None else int(duration)
+        if values.shape != (self.population.count,) or not np.all(np.isfinite(values)):
+            raise ValueError("rates must be a finite vector matching the population")
+        if np.any(values < 0.0) or np.any(values > 1.0):
+            raise ValueError("rates must be in [0, 1]")
+        if ticks <= 0:
+            raise ValueError("duration must be positive")
+        self._rates, self._remaining = values.copy(), ticks
+
+    def clear(self) -> None:
+        self._rates = None
+        self._remaining = 0
+
+    reset = clear
+
+    def produce(self) -> Drives:
+        if self._rates is None or self._remaining <= 0:
+            return Drives()
+        values = (self.rng.random(self.population.count) < self._rates).astype(float)
+        self._remaining -= 1
+        if self._remaining == 0:
+            self._rates = None
         return Drives({self.population: values})
 
 

@@ -1,6 +1,12 @@
 import numpy as np
 import pytest
-from src.interaction.rates import DopamineReadout, PopulationRate, UnipolarRateInput
+from src.interaction.drives import TonicDrive
+from src.interaction.rates import (
+    DopamineReadout,
+    PopulationRate,
+    RatePatternInput,
+    UnipolarRateInput,
+)
 from src.network.population import NeuronPopulationSpec, PopulationLayout
 from src.network.snn import Spikes
 
@@ -37,6 +43,23 @@ def test_rate_input_clear_and_reset_cancel_pending_drive():
     source.write(1.0)
     source.reset()
     assert source.produce().drives == {}
+
+
+def test_pattern_input_drives_a_bounded_rate_vector():
+    pop = population()
+    source = RatePatternInput(pop, np.random.default_rng(2))
+    source.write(np.array([0.0, 1.0, 1.0, 0.0]))
+    assert np.array_equal(source.produce().drives[pop], np.array([0.0, 1.0, 1.0, 0.0]))
+
+
+def test_tonic_drive_has_fixed_zero_mean_cell_diversity():
+    pop = population()
+    source = TonicDrive(pop, 0.4, heterogeneity=0.1, rng=np.random.default_rng(3))
+    first = source.produce().drives[pop]
+    second = source.produce().drives[pop]
+    assert np.isclose(float(np.mean(first)), 0.4)
+    assert not np.allclose(first, first[0])
+    assert np.array_equal(first, second)
 
 
 def test_population_rate_decodes_monotonically_and_resets():

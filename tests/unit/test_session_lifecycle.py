@@ -46,3 +46,18 @@ def test_session_observes_then_commits_all_adaptations_from_one_registration_lis
     session.tick()
 
     assert events == ["produce", "observe:0.1", "observe:0.2", "propose:0.1", "propose:0.2"]
+
+
+def test_session_can_freeze_all_adaptation_lifecycle_steps():
+    snn = NetworkDefinition((NeuronPopulationSpec("POPULATION", 1),), ()).compile(
+        np.random.default_rng(1)
+    )
+    events: list[str] = []
+    session = Session.build(snn, [_Drive(events), _Adaptation(snn, events, 0.1)])
+
+    with session.frozen_adaptations():
+        session.tick()
+
+    assert events == ["produce"]
+    session.tick()
+    assert events == ["produce", "produce", "observe:0.1", "propose:0.1"]

@@ -5,10 +5,10 @@
 - `viability/`: qualitative, multi-seed acceptance envelopes. The minimal E/I
   stability contract uses fixed E/I feedback, explicit homeostatic drives,
   and synaptic scaling, then perturbs transient
-  membrane state directly. The dopamine TD scenario tests reward/current-value
-  signs, opposing previous-value signs, recovery, and numerical health across
-  wiring seeds. Add the `slow` marker when a test is unsuitable for the default
-  fast suite.
+  membrane state directly. The dopamine scenario establishes a quiet tonic
+  baseline, then tests reward/current-value signs, opposing previous-value
+  signs, recovery, and numerical health across wiring seeds. Add the `slow`
+  marker when a test is unsuitable for the default fast suite.
 - `support/`: test-only scenario operations; production diagnostics and network
   setup remain under `src/`.
 
