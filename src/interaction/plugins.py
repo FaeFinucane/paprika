@@ -54,6 +54,18 @@ class Observer(Protocol):
 
 
 @runtime_checkable
+class ValueObserver(Observer, Protocol):
+    """An observer whose latest numeric output can be recorded by an experiment.
+    """
+
+    @property
+    def report_name(self) -> str: ...
+
+    @property
+    def value(self) -> float | np.ndarray: ...
+
+
+@runtime_checkable
 class SpikeAdaptation(Observer, Protocol):
     """Observes spikes, then proposes future parameter changes."""
 

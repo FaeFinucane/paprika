@@ -76,6 +76,7 @@ def test_population_rate_decodes_monotonically_and_resets():
     assert 0.0 < low < high <= 1.0
     decoder.reset()
     assert decoder.rate == 0.0
+    assert decoder.report_name == "rate:x"
 
 
 def test_dopamine_baseline_and_symmetric_deadzone():
@@ -87,6 +88,7 @@ def test_dopamine_baseline_and_symmetric_deadzone():
     assert np.isclose(dopamine.decode(0.8), -dopamine.decode(0.2))
     zero_baseline = DopamineReadout(rate, baseline=0.0, deadzone=0.1)
     assert zero_baseline.decode(0.0) == 0.0
+    assert dopamine.report_name == "dopamine"
 
 
 def test_dopamine_readout_decodes_the_rate_observed_once_by_the_session():

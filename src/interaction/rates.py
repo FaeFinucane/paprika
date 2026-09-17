@@ -127,6 +127,10 @@ class PopulationRate(Observer):
         return self._value
 
     @property
+    def report_name(self) -> str:
+        return f"rate:{self.population.spec.name}"
+
+    @property
     def rate(self) -> float:
         return self._value
 
@@ -163,6 +167,10 @@ class DopamineReadout(Observer):
     @property
     def value(self) -> float:
         return self._value
+
+    @property
+    def report_name(self) -> str:
+        return "dopamine"
 
     def decode(self, rate: float) -> float:
         delta = float(rate) - self.baseline
