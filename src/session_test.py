@@ -1,4 +1,7 @@
+"""Contract for session hook lifecycle ordering."""
+
 import pytest
+
 from src.builder import NetworkBuilder
 from src.interaction.plugins import Drives
 from src.network.adjustments import NetworkAdjustment
@@ -59,3 +62,21 @@ def test_session_can_freeze_all_adaptation_lifecycle_steps():
     assert events == ["produce"]
     session.tick()
     assert events == ["produce", "produce", "observe:0.1", "propose:0.1"]
+
+
+def test_session_add_registers_every_lifecycle_role_once():
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 1)
+    session = builder.compile(1)
+    events: list[str] = []
+    adaptation = _Adaptation(session.snn, events, 0.1)
+
+    session.add(adaptation)
+
+    assert adaptation in session.observers
+    assert adaptation in session.adaptations
+    with pytest.raises(ValueError, match="already registered"):
+        session.add(adaptation)
+
+    session.tick()
+    assert events == ["observe:0.1", "propose:0.1"]

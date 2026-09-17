@@ -178,8 +178,8 @@ class DopamineReadout(Observer):
             )
         )
 
-    def observe(self, spikes: Spikes) -> None:
-        self.source.observe(spikes)
+    def observe(self, _spikes: Spikes) -> None:
+        """Decode the source rate prepared earlier in this session tick."""
         self._value = self.decode(self.source.rate)
 
     def reset(self) -> None:

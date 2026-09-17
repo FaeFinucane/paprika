@@ -36,21 +36,19 @@ def test_minimal_recurrent_ei_circuit_has_a_bounded_feedback_response_across_see
 
         # Freeze slow adaptation at its selected operating point. The explicit
         # drives remain active, but cannot repair the fast response below.
-        session.adaptations.clear()
-        session.stateful_adaptations.clear()
-
-        # One whole-network E perturbation should recruit I and contain E over
-        # the ensuing short causal response window.
-        clear_transient_activity(snn)
-        set_membrane_voltage(snn, excitatory, voltage=3.0)
-        stimulated = session.tick()
-        response = [session.tick() for _ in range(3)]
-        assert float(np.mean(stimulated.population(excitatory))) == 1.0
-        assert (
-            max(float(np.mean(spikes.population(inhibitory))) for spikes in response)
-            >= baseline_i + 0.25
-        )
-        assert np.mean([np.mean(spikes.population(excitatory)) for spikes in response]) <= 0.20
+        with session.frozen_adaptations():
+            # One whole-network E perturbation should recruit I and contain E
+            # over the ensuing short causal response window.
+            clear_transient_activity(snn)
+            set_membrane_voltage(snn, excitatory, voltage=3.0)
+            stimulated = session.tick()
+            response = [session.tick() for _ in range(3)]
+            assert float(np.mean(stimulated.population(excitatory))) == 1.0
+            assert (
+                max(float(np.mean(spikes.population(inhibitory))) for spikes in response)
+                >= baseline_i + 0.25
+            )
+            assert np.mean([np.mean(spikes.population(excitatory)) for spikes in response]) <= 0.20
 
         for _ in range(300):
             session.tick()

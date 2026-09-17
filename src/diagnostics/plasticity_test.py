@@ -1,4 +1,7 @@
+"""Contract for dopamine-plasticity diagnostics."""
+
 import pytest
+
 from src.builder import NetworkBuilder
 from src.diagnostics import inspect_dopamine_eligibility
 from src.interaction.plasticity import DopamineSTDP

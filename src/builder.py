@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import TypeAlias
 
 import numpy as np
@@ -19,8 +19,10 @@ from .network.connectivity import (
     build_synapses,
 )
 from .network.population import (
+    DopamineResponse,
     FeaturePopulationSpec,
     NeuronPopulationSpec,
+    OutputKind,
     PopulationLayout,
     PopulationSpec,
 )
@@ -103,8 +105,8 @@ class NetworkBuilder:
         name: str | NeuronPopulationSpec,
         neuron_count: int | None = None,
         *,
-        output: str = "excitatory",
-        dopamine_response: str = "neutral",
+        output: OutputKind = "excitatory",
+        dopamine_response: DopamineResponse = "neutral",
         plugins: tuple[PluginSpec, ...] = (),
     ) -> PopulationHandle:
         if isinstance(name, NeuronPopulationSpec):
@@ -117,8 +119,8 @@ class NetworkBuilder:
             spec = NeuronPopulationSpec(
                 name,
                 neuron_count,
-                output=output,  # type: ignore[arg-type]
-                dopamine_response=dopamine_response,  # type: ignore[arg-type]
+                output=output,
+                dopamine_response=dopamine_response,
             )
         self._add_population_spec(spec, plugins)
         return PopulationHandle(spec.name)
@@ -163,8 +165,8 @@ class NetworkBuilder:
 
     def connect(
         self,
-        source: str | ConnectionSpec,
-        target: str | None = None,
+        source: str | PopulationHandle | ConnectionSpec,
+        target: str | PopulationHandle | None = None,
         topology: TopologySpec | None = None,
         strength: StrengthSpec | None = None,
         learning: LearningPolicy = "fixed",
@@ -179,9 +181,36 @@ class NetworkBuilder:
         else:
             if target is None or topology is None or strength is None:
                 raise TypeError("target, topology, and strength are required")
-            spec = ConnectionSpec(source, target, topology, strength, learning, scalable, name)
+            source_name = source.name if isinstance(source, PopulationHandle) else source
+            target_name = target.name if isinstance(target, PopulationHandle) else target
+            spec = ConnectionSpec(
+                source_name,
+                target_name,
+                topology,
+                replace(strength),
+                learning,
+                scalable,
+                name,
+            )
         self._connections.append(spec)
         return spec
+
+    def connection(
+        self, source: str | PopulationHandle, target: str | PopulationHandle
+    ) -> ConnectionSpec:
+        """Return the unique declared projection between two populations."""
+        source_name = source.name if isinstance(source, PopulationHandle) else source
+        target_name = target.name if isinstance(target, PopulationHandle) else target
+        matches = [
+            connection
+            for connection in self._connections
+            if connection.source == source_name and connection.target == target_name
+        ]
+        if len(matches) != 1:
+            raise KeyError(
+                f"expected one connection from {source_name!r} to {target_name!r}, found {len(matches)}"
+            )
+        return matches[0]
 
     def compile(self, seed: int = 0) -> Session:
         """Compile declarations and return a ready-to-run session."""

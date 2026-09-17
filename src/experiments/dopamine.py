@@ -6,7 +6,9 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..architectures.dopamine import DopamineCircuit, build_dopamine_circuit
+from ..builder import NetworkBuilder
+from ..circuits.asymmetric_recurrent import AsymmetricRecurrentSpec
+from ..circuits.vta_dopamine import DopamineCircuit, add_vta_dopamine_circuit
 
 
 @dataclass(frozen=True)
@@ -18,7 +20,7 @@ class AcquisitionTrial:
     outcome_dopamine_peak: float
     vta_inhibitory_peak: float
     inferred_state_rate: float
-    temporal_stage_rate: float
+    temporal_rate: float
 
 
 @dataclass
@@ -38,13 +40,14 @@ def run_paired_acquisition(
     outcome: float = 0.7,
     outcome_ticks: int = 10,
     inter_trial_ticks: int = 30,
+    temporal: AsymmetricRecurrentSpec = AsymmetricRecurrentSpec(),
 ) -> PairedAcquisitionResult:
     """Run repeated cue/outcome pairings without resetting neural state."""
     if trials <= 0 or cue_ticks <= 0 or cue_to_outcome_ticks < 0 or outcome_ticks <= 0:
         raise ValueError("invalid cue-to-outcome timing")
     if settle_ticks < 0 or inter_trial_ticks < 0 or not -1.0 <= outcome <= 1.0:
         raise ValueError("invalid acquisition configuration")
-    circuit = build_dopamine_circuit(seed)
+    circuit = add_vta_dopamine_circuit(NetworkBuilder(), temporal=temporal).build(seed)
     pattern = _default_cue_pattern(circuit) if cue_pattern is None else cue_pattern
     _tick(circuit, settle_ticks)
     observations: list[AcquisitionTrial] = []
@@ -80,6 +83,7 @@ def run_shuffled_acquisition(
     outcome: float = 0.7,
     outcome_ticks: int = 10,
     inter_trial_ticks: int = 30,
+    temporal: AsymmetricRecurrentSpec = AsymmetricRecurrentSpec(),
 ) -> PairedAcquisitionResult:
     """Run cue/outcome pairings with a sampled delay on each continuous trial."""
     if maximum_cue_to_outcome_ticks < 0:
@@ -87,7 +91,7 @@ def run_shuffled_acquisition(
     if trials <= 0:
         raise ValueError("trials must be positive")
     delays = np.random.default_rng(seed).integers(0, maximum_cue_to_outcome_ticks + 1, trials)
-    circuit = build_dopamine_circuit(seed)
+    circuit = add_vta_dopamine_circuit(NetworkBuilder(), temporal=temporal).build(seed)
     if settle_ticks < 0 or cue_ticks <= 0 or outcome_ticks <= 0 or inter_trial_ticks < 0:
         raise ValueError("invalid acquisition timing")
     if not -1.0 <= outcome <= 1.0:
@@ -131,10 +135,7 @@ def _observe(circuit: DopamineCircuit, ticks: int) -> tuple[list[float], list[fl
             )
         )
         temporal.append(
-            max(
-                float(np.mean(spikes.population(circuit.populations[stage])))
-                for stage in circuit.temporal.stages
-            )
+            float(np.mean(spikes.population(circuit.populations[circuit.temporal.excitatory])))
         )
     return dopamine, inhibitory, float(np.mean(state)), float(np.mean(temporal))
 
@@ -154,7 +155,6 @@ __all__ = [
     "AcquisitionTrial",
     "DopamineCircuit",
     "PairedAcquisitionResult",
-    "build_dopamine_circuit",
     "run_paired_acquisition",
     "run_shuffled_acquisition",
 ]

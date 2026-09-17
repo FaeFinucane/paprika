@@ -86,7 +86,7 @@ class FanInSpec:
         return src[keep], dst[keep]
 
 
-@dataclass(frozen=True)
+@dataclass
 class StrengthSpec:
     mean: float
     spread: float = 0.0
@@ -94,6 +94,9 @@ class StrengthSpec:
     maximum: float = 1.0
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
         if (
             not np.isfinite(self.mean)
             or self.spread < 0
@@ -108,7 +111,7 @@ class StrengthSpec:
         return np.clip(rng.normal(self.mean, self.spread, count), self.minimum, self.maximum)
 
 
-@dataclass(frozen=True)
+@dataclass
 class ConnectionSpec:
     source: str
     target: str
@@ -119,6 +122,9 @@ class ConnectionSpec:
     name: str | None = None
 
     def __post_init__(self) -> None:
+        self.validate()
+
+    def validate(self) -> None:
         if self.learning not in (
             "fixed",
             "dopamine_stdp",
@@ -202,6 +208,9 @@ def build_synapses(
     specs: Sequence[ConnectionSpec],
     rng: np.random.Generator,
 ) -> SparseSynapses:
+    for spec in specs:
+        spec.validate()
+        spec.strength.validate()
     names = [spec.projection_name for spec in specs]
     if len(set(names)) != len(names):
         raise ValueError("projection names must be unique")

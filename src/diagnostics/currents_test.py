@@ -1,3 +1,5 @@
+"""Contract for projection-current diagnostics."""
+
 from src.builder import NetworkBuilder
 from src.diagnostics import incoming_projection_currents
 from src.network.connectivity import FanOutSpec, StrengthSpec

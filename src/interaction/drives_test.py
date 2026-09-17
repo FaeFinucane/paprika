@@ -1,5 +1,8 @@
+"""Contract for homeostatic drive dynamics."""
+
 import numpy as np
 import pytest
+
 from src.builder import NetworkBuilder
 from src.interaction.drives import HomeostaticDrive
 from src.network.snn import Spikes

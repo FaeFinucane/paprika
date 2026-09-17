@@ -16,33 +16,62 @@ from .network.snn import SNN
 @dataclass
 class Session:
     snn: SNN
-    drive_sources: list[DriveSource] = field(default_factory=list)
-    observers: list[Observer] = field(default_factory=list)
-    adaptations: list[SpikeAdaptation] = field(default_factory=list)
-    stateful_adaptations: list[StatefulAdaptation] = field(default_factory=list)
+    _hooks: list[Hook] = field(default_factory=list, init=False, repr=False)
+    _drive_sources: list[DriveSource] = field(default_factory=list, init=False, repr=False)
+    _observers: list[Observer] = field(default_factory=list, init=False, repr=False)
+    _adaptations: list[SpikeAdaptation] = field(default_factory=list, init=False, repr=False)
+    _stateful_adaptations: list[StatefulAdaptation] = field(
+        default_factory=list, init=False, repr=False
+    )
     adaptations_enabled: bool = True
 
     @classmethod
     def build(cls, snn: SNN, hooks: Sequence[Hook]) -> "Session":
-        drive_sources: list[DriveSource] = []
-        observers: list[Observer] = []
-        adaptations: list[SpikeAdaptation] = []
-        stateful_adaptations: list[StatefulAdaptation] = []
+        session = cls(snn)
+        session.add(*hooks)
+        return session
+
+    @property
+    def drive_sources(self) -> tuple[DriveSource, ...]:
+        return tuple(self._drive_sources)
+
+    @property
+    def observers(self) -> tuple[Observer, ...]:
+        return tuple(self._observers)
+
+    @property
+    def adaptations(self) -> tuple[SpikeAdaptation, ...]:
+        return tuple(self._adaptations)
+
+    @property
+    def stateful_adaptations(self) -> tuple[StatefulAdaptation, ...]:
+        return tuple(self._stateful_adaptations)
+
+    def add(self, *hooks: Hook) -> None:
+        """Register hooks through every lifecycle role they implement.
+
+        A hook that both observes spikes and proposes updates is registered for
+        both phases atomically. Runtime code must use this method rather than
+        mutating lifecycle lists, so a plasticity rule cannot be scheduled for
+        commits while silently missing its observation phase.
+        """
         for hook in hooks:
+            if any(hook is registered for registered in self._hooks):
+                raise ValueError("session hook is already registered")
             registered = False
             if isinstance(hook, DriveSource):
-                drive_sources.append(hook)
+                self._drive_sources.append(hook)
                 registered = True
             if isinstance(hook, Observer):
-                observers.append(hook)
+                self._observers.append(hook)
                 registered = True
             if isinstance(hook, SpikeAdaptation):
-                adaptations.append(hook)
+                self._adaptations.append(hook)
             if isinstance(hook, StatefulAdaptation):
-                stateful_adaptations.append(hook)
+                self._stateful_adaptations.append(hook)
             if not registered:
                 raise TypeError("session hook does not implement a lifecycle role")
-        return cls(snn, drive_sources, observers, adaptations, stateful_adaptations)
+            self._hooks.append(hook)
 
     @contextmanager
     def frozen_adaptations(self):
@@ -57,19 +86,19 @@ class Session:
     def tick(self):
         drives = Drives()
 
-        for source in self.drive_sources:
+        for source in self._drive_sources:
             drives = drives.accumulate(source.produce())
 
         spikes = self.snn.step(drives.drives)
 
-        for observer in self.observers:
+        for observer in self._observers:
             if not self.adaptations_enabled and isinstance(observer, SpikeAdaptation):
                 continue
             observer.observe(spikes)
 
         if self.adaptations_enabled:
-            self.snn.commit([adaptation.propose(self.snn) for adaptation in self.adaptations])
-            for adaptation in self.stateful_adaptations:
+            self.snn.commit([adaptation.propose(self.snn) for adaptation in self._adaptations])
+            for adaptation in self._stateful_adaptations:
                 adaptation.commit_state()
 
         return spikes

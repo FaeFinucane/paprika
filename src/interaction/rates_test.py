@@ -1,5 +1,9 @@
+"""Contract for rate inputs and population readouts."""
+
 import numpy as np
 import pytest
+
+from src.builder import NetworkBuilder
 from src.interaction.drives import TonicDrive
 from src.interaction.rates import (
     DopamineReadout,
@@ -83,3 +87,19 @@ def test_dopamine_baseline_and_symmetric_deadzone():
     assert np.isclose(dopamine.decode(0.8), -dopamine.decode(0.2))
     zero_baseline = DopamineReadout(rate, baseline=0.0, deadzone=0.1)
     assert zero_baseline.decode(0.0) == 0.0
+
+
+def test_dopamine_readout_decodes_the_rate_observed_once_by_the_session():
+    builder = NetworkBuilder()
+    builder.add_population("DA", 4)
+    session = builder.compile(1)
+    population = session.snn.layout.population("DA")
+    rate = PopulationRate(population, decay=0.5)
+    dopamine = DopamineReadout(rate, baseline=0.25, deadzone=0.0)
+    session.add(rate, dopamine)
+    session.snn.neurons.voltage[:] = 3.0
+
+    session.tick()
+
+    assert rate.rate == 0.5
+    assert dopamine.value > 0.0
