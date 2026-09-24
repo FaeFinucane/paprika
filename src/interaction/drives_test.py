@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from src.builder import NetworkBuilder
-from src.interaction.drives import HomeostaticDrive
+from src.interaction.drives import HomeostaticDrive, HomeostaticDriveSpec
 from src.network.snn import Spikes
 
 pytestmark = pytest.mark.unit
@@ -17,11 +17,13 @@ def test_homeostatic_drive_moves_toward_its_target_and_respects_bounds():
     population = snn.layout.population("POPULATION")
     homeostasis = HomeostaticDrive(
         population,
-        target_rate=0.2,
-        learning_rate=0.5,
-        rate_decay=0.0,
-        minimum_current=-0.1,
-        maximum_current=0.1,
+        HomeostaticDriveSpec(
+            target_rate=0.2,
+            learning_rate=0.5,
+            rate_decay=0.0,
+            minimum_current=-0.1,
+            maximum_current=0.1,
+        ),
     )
 
     silent = Spikes(np.zeros(4, dtype=bool), tick=1, _fingerprint=snn.layout.fingerprint)

@@ -2,9 +2,9 @@
 
 import pytest
 
-from src.builder import NetworkBuilder, TonicDriveSpec
+from src.builder import NetworkBuilder
 from src.diagnostics import inspect_network
-from src.interaction.drives import TonicDrive
+from src.interaction.drives import TonicDrive, TonicDriveSpec
 from src.network.connectivity import FanInSpec, FanOutSpec, StrengthSpec
 
 pytestmark = pytest.mark.unit
@@ -37,3 +37,20 @@ def test_connection_can_be_retrieved_and_edited_through_population_handles():
     mask = session.snn.synapses.projection_mask("SOURCE_to_TARGET")
     assert mask.any()
     assert session.snn.synapses.strength[mask].mean() == 0.3
+
+
+def test_direct_plugin_builds_hooks_when_the_builder_compiles():
+    installed = []
+
+    class DirectPlugin:
+        def build_hooks(self, session, _rng):
+            installed.append(session)
+            return ()
+
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 1)
+    builder.add_plugin(DirectPlugin())
+
+    session = builder.compile(1)
+
+    assert installed == [session]

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ..builder import HomeostaticDriveSpec, NetworkBuilder, PopulationHandle, SynapticScalingSpec
-from ..network.connectivity import FanInSpec, FanOutSpec, StrengthSpec
+from ..builder import NetworkBuilder
+from ..interaction.drives import HomeostaticDriveSpec
+from ..interaction.plasticity.homeostasis import SynapticScalingSpec
+from ..network.connectivity import FanOutSpec, StrengthSpec
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,7 +17,6 @@ class AttractorSpec:
     name: str = "INFERRED_STATE"
     excitatory_size: int = 48
     inhibitory_size: int = 12
-    cue_fanin: float = 6
     recurrent_fanout: float = 5
     inhibition_fanout: float = 6
     target_rate: float = 0.04
@@ -23,20 +24,32 @@ class AttractorSpec:
 
 @dataclass(frozen=True, slots=True)
 class AttractorHandle:
+    """Ports of an inferred-state attractor.
+
+    External circuits may drive ``input`` and read ``output``.  They are both
+    the excitatory assembly: the parent composition decides every projection
+    crossing the circuit boundary.
+    """
+
     excitatory: str
     inhibitory: str
+
+    @property
+    def input(self) -> str:
+        return self.excitatory
+
+    @property
+    def output(self) -> str:
+        return self.excitatory
 
 
 def add_attractor(
     builder: NetworkBuilder,
     spec: AttractorSpec,
-    *,
-    cue: str | PopulationHandle,
 ) -> AttractorHandle:
-    """Declare a cue-driven inferred-state E/I attractor."""
+    """Declare an inferred-state E/I attractor with explicit external ports."""
     if min(spec.excitatory_size, spec.inhibitory_size) <= 0 or not 0 <= spec.target_rate <= 1:
         raise ValueError("invalid attractor dimensions or target rate")
-    cue_name = cue.name if isinstance(cue, PopulationHandle) else cue
     excitatory = f"{spec.name}_E"
     inhibitory = f"{spec.name}_I"
     builder.add_population(
@@ -55,18 +68,8 @@ def add_attractor(
         dopamine_response="aligned",
         plugins=(HomeostaticDriveSpec(spec.target_rate),),
     )
-    cue_strength = StrengthSpec(0.25, 0.02, maximum=0.8)
     recurrent_strength = StrengthSpec(0.12, 0.02, maximum=0.8)
     inhibitory_strength = StrengthSpec(0.22, 0.02, maximum=0.8)
-    builder.connect(
-        cue_name,
-        excitatory,
-        FanInSpec(spec.cue_fanin),
-        cue_strength,
-        "dopamine_stdp",
-        True,
-        f"{cue_name}_to_{excitatory}",
-    )
     builder.connect(
         excitatory,
         excitatory,

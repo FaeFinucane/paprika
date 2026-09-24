@@ -7,10 +7,11 @@ from typing import Any
 
 import numpy as np
 
-from ..builder import HomeostaticDriveSpec, NetworkBuilder, SynapticScalingSpec
+from ..builder import NetworkBuilder
+from ..interaction.drives import HomeostaticDriveSpec
+from ..interaction.plasticity.homeostasis import SynapticScalingSpec
 from ..network.connectivity import FanOutSpec, StrengthSpec
 from ..network.population import Population
-from .attractor import AttractorHandle
 
 
 @dataclass(frozen=True)
@@ -93,13 +94,10 @@ class AsymmetricRecurrentSpec:
     name: str = "TEMPORAL"
     excitatory_size: int = 48
     inhibitory_size: int = 12
-    seed_size: int = 8
-    state_fanout: float = 3
     recurrent_fanout: int = 4
     forward_span: int = 8
     excitatory_to_inhibitory_fanout: float = 8
     inhibitory_to_excitatory_fanout: float = 24
-    state_strength: float = 0.30
     recurrent_strength: float = 0.62
     inhibitory_strength: float = 0.02
     target_rate: float = 0.03
@@ -110,24 +108,27 @@ class AsymmetricRecurrentHandle:
     excitatory: str
     inhibitory: str
 
+    @property
+    def input(self) -> str:
+        return self.excitatory
+
+    @property
+    def output(self) -> str:
+        return self.excitatory
+
 
 def add_asymmetric_recurrent_circuit(
     builder: NetworkBuilder,
     spec: AsymmetricRecurrentSpec,
-    *,
-    state: AttractorHandle,
 ) -> AsymmetricRecurrentHandle:
     """Declare a sparse asymmetric recurrent E/I temporal circuit."""
     if (
-        min(spec.excitatory_size, spec.inhibitory_size, spec.seed_size) <= 0
-        or spec.seed_size > spec.excitatory_size
-        or not 0 < spec.state_fanout <= spec.seed_size
+        min(spec.excitatory_size, spec.inhibitory_size) <= 0
         or not 0 < spec.recurrent_fanout <= spec.forward_span
         or not 0 < spec.forward_span * 2 < spec.excitatory_size
         or not 0 < spec.excitatory_to_inhibitory_fanout <= spec.inhibitory_size
         or not 0 < spec.inhibitory_to_excitatory_fanout <= spec.excitatory_size
         or min(
-            spec.state_strength,
             spec.recurrent_strength,
             spec.inhibitory_strength,
         )
@@ -152,15 +153,6 @@ def add_asymmetric_recurrent_circuit(
         output="inhibitory",
         dopamine_response="aligned",
         plugins=(HomeostaticDriveSpec(spec.target_rate),),
-    )
-    builder.connect(
-        state.excitatory,
-        excitatory,
-        TargetWindowFanOutSpec(spec.state_fanout, target_start=0, target_count=spec.seed_size),
-        StrengthSpec(spec.state_strength, 0.02, maximum=0.8),
-        "dopamine_stdp",
-        True,
-        f"{state.excitatory}_to_{excitatory}_seed",
     )
     builder.connect(
         excitatory,

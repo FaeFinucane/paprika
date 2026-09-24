@@ -4,7 +4,7 @@ import pytest
 
 from src.builder import NetworkBuilder
 from src.diagnostics import NetworkTrace
-from src.interaction.drives import TonicDrive
+from src.interaction.drives import TonicDrive, TonicDriveSpec
 from src.network.connectivity import FanOutSpec, StrengthSpec
 from src.session import Session
 
@@ -17,7 +17,7 @@ def test_network_trace_records_generic_population_and_projection_state():
     builder.add_population("TARGET", 1)
     builder.connect("SOURCE", "TARGET", FanOutSpec(1), StrengthSpec(0.2))
     snn = builder.compile(2).snn
-    source_drive = TonicDrive(snn.layout.population("SOURCE"), 1.0)
+    source_drive = TonicDrive(snn.layout.population("SOURCE"), TonicDriveSpec(1.0))
     trace = NetworkTrace(snn, current_drives=[source_drive])
     session = Session.build(snn, [source_drive, trace])
     session.tick()

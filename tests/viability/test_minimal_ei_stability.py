@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 from src.builder import NetworkBuilder
 from src.diagnostics import NetworkTrace, inspect_network
-from src.interaction.drives import HomeostaticDrive
-from src.interaction.plasticity.homeostasis import SynapticScaling
+from src.interaction.drives import HomeostaticDrive, HomeostaticDriveSpec
+from src.interaction.plasticity.homeostasis import SynapticScaling, SynapticScalingSpec
 from src.interaction.plasticity.inhibitory import InhibitoryHomeostasis
 from src.interaction.rates import UnipolarRateInput
 from src.network.connectivity import FanInSpec, FanOutSpec, StrengthSpec
@@ -56,8 +56,7 @@ def test_minimal_recurrent_ei_circuit_has_a_bounded_feedback_response_across_see
 
         # Withdrawal intentionally permits either quiescence or sparse
         # persistence. Only sustained high activity is a generic failure.
-        for drive in homeostatic_drives:
-            drive.enabled = False
+        session.remove(*homeostatic_drives)
         withdrawal_e: list[float] = []
         for _ in range(500):
             spikes = session.tick()
@@ -144,22 +143,28 @@ def _minimal_ei_system(
     inhibitory = snn.layout.population("INHIBITORY")
     excitatory_drive = HomeostaticDrive(
         excitatory,
-        target_rate=0.08,
-        learning_rate=0.002,
-        rate_decay=0.98,
-        minimum_current=-0.5,
-        maximum_current=0.5,
+        HomeostaticDriveSpec(
+            target_rate=0.08,
+            learning_rate=0.002,
+            rate_decay=0.98,
+            minimum_current=-0.5,
+            maximum_current=0.5,
+        ),
     )
     inhibitory_drive = HomeostaticDrive(
         inhibitory,
-        target_rate=0.10,
-        learning_rate=0.002,
-        rate_decay=0.98,
-        minimum_current=-0.5,
-        maximum_current=0.5,
+        HomeostaticDriveSpec(
+            target_rate=0.10,
+            learning_rate=0.002,
+            rate_decay=0.98,
+            minimum_current=-0.5,
+            maximum_current=0.5,
+        ),
     )
     scaling = SynapticScaling(
-        snn, excitatory, target_rate=0.08, learning_rate=0.0001, rate_decay=0.995
+        snn,
+        excitatory,
+        SynapticScalingSpec(target_rate=0.08, learning_rate=0.0001, rate_decay=0.995),
     )
     inhibitory_homeostasis = InhibitoryHomeostasis(
         snn, target_rate=0.08, learning_rate=0.0005, trace_decay=0.95
@@ -207,27 +212,33 @@ def _ei_transmission_system(
         input_b,
         HomeostaticDrive(
             excitatory,
-            target_rate=0.08,
-            learning_rate=0.002,
-            rate_decay=0.98,
-            minimum_current=-0.5,
-            maximum_current=0.5,
+            HomeostaticDriveSpec(
+                target_rate=0.08,
+                learning_rate=0.002,
+                rate_decay=0.98,
+                minimum_current=-0.5,
+                maximum_current=0.5,
+            ),
         ),
         HomeostaticDrive(
             inhibitory,
-            target_rate=0.10,
-            learning_rate=0.002,
-            rate_decay=0.98,
-            minimum_current=-0.5,
-            maximum_current=0.5,
+            HomeostaticDriveSpec(
+                target_rate=0.10,
+                learning_rate=0.002,
+                rate_decay=0.98,
+                minimum_current=-0.5,
+                maximum_current=0.5,
+            ),
         ),
         HomeostaticDrive(
             output,
-            target_rate=0.05,
-            learning_rate=0.002,
-            rate_decay=0.98,
-            minimum_current=-0.5,
-            maximum_current=0.5,
+            HomeostaticDriveSpec(
+                target_rate=0.05,
+                learning_rate=0.002,
+                rate_decay=0.98,
+                minimum_current=-0.5,
+                maximum_current=0.5,
+            ),
         ),
     ]
     return snn, Session.build(snn, components), input_a, input_b, output

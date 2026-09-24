@@ -55,8 +55,7 @@ class Observer(Protocol):
 
 @runtime_checkable
 class ValueObserver(Observer, Protocol):
-    """An observer whose latest numeric output can be recorded by an experiment.
-    """
+    """An observer whose latest numeric output can be recorded by an experiment."""
 
     @property
     def report_name(self) -> str: ...

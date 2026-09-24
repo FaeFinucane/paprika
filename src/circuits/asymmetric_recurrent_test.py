@@ -3,7 +3,16 @@
 import numpy as np
 import pytest
 
-from .vta_dopamine import build_dopamine_circuit
+from src.builder import NetworkBuilder
+from src.interaction.rates import RatePatternInput
+from src.network.connectivity import FanInSpec, StrengthSpec
+
+from .asymmetric_recurrent import (
+    AsymmetricRecurrentSpec,
+    TargetWindowFanOutSpec,
+    add_asymmetric_recurrent_circuit,
+)
+from .attractor import AttractorSpec, add_attractor
 
 pytestmark = pytest.mark.viability
 
@@ -11,42 +20,57 @@ pytestmark = pytest.mark.viability
 def test_sparse_state_seeding_recruits_a_bounded_asymmetric_recurrent_circuit():
     """The circuit produces a bounded cue-evoked temporal trajectory."""
     for seed in range(4):
-        circuit = build_dopamine_circuit(seed, enable_dopamine_learning=False)
-        _tick(circuit, 240)
-        cue = np.zeros(circuit.populations["CUE"].count)
+        builder = NetworkBuilder()
+        cue_handle = builder.add_feature_population("CUE", ("CUE",), width=16)
+        state = add_attractor(builder, AttractorSpec())
+        builder.connect(
+            cue_handle,
+            state.input,
+            FanInSpec(6),
+            StrengthSpec(0.25, 0.02, maximum=0.8),
+            "dopamine_stdp",
+            True,
+        )
+        temporal_spec = AsymmetricRecurrentSpec()
+        temporal = add_asymmetric_recurrent_circuit(builder, temporal_spec)
+        builder.connect(
+            state.output,
+            temporal.input,
+            TargetWindowFanOutSpec(3, target_start=0, target_count=8),
+            StrengthSpec(0.30, 0.02, maximum=0.8),
+            "dopamine_stdp",
+            True,
+        )
+        session = builder.compile(seed)
+        populations = {
+            population.spec.name: population for population in session.snn.layout.populations
+        }
+        cue_input = RatePatternInput(populations[cue_handle.name], np.random.default_rng(seed))
+        session.add(cue_input)
+        _tick(session, 240)
+        cue = np.zeros(populations[cue_handle.name].count)
         cue[: cue.size // 2] = 1.0
-        circuit.present_cue(cue, 5)
+        cue_input.write(cue, 5)
         state_rates = []
         temporal_rates = []
-        inhibitory_rates = []
         for _ in range(60):
-            spikes = circuit.tick()
-            state_rates.append(
-                float(
-                    np.mean(
-                        spikes.population(circuit.populations[circuit.inferred_state.excitatory])
-                    )
-                )
-            )
+            spikes = session.tick()
+            state_rates.append(float(np.mean(spikes.population(populations[state.excitatory]))))
             temporal_rates.append(
-                float(np.mean(spikes.population(circuit.populations[circuit.temporal.excitatory])))
-            )
-            inhibitory_rates.append(
-                float(np.mean(spikes.population(circuit.populations["VTA_INHIB"])))
+                float(np.mean(spikes.population(populations[temporal.excitatory])))
             )
 
         assert max(state_rates) >= 0.25
         assert max(temporal_rates) >= 0.20
         assert max(temporal_rates[8:16]) >= 0.05
-        assert max(inhibitory_rates) >= 1 / circuit.populations["VTA_INHIB"].count
         assert max(temporal_rates[30:]) <= 0.15
-        synapses = circuit.session.snn.synapses
+        synapses = session.snn.synapses
         recurrent = synapses.projection_mask("TEMPORAL_E_recurrent")
-        count = circuit.populations[circuit.temporal.excitatory].count
+        count = populations[temporal.excitatory].count
         offsets = (synapses.target[recurrent] - synapses.source[recurrent]) % count
         assert np.all((1 <= offsets) & (offsets <= 8))
 
 
-def _tick(circuit, ticks: int) -> None:
+def _tick(session, ticks: int) -> None:
     for _ in range(ticks):
-        circuit.tick()
+        session.tick()

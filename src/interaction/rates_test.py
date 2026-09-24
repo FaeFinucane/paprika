@@ -4,10 +4,11 @@ import numpy as np
 import pytest
 
 from src.builder import NetworkBuilder
-from src.interaction.drives import TonicDrive
+from src.interaction.drives import TonicDrive, TonicDriveSpec
 from src.interaction.rates import (
     DopamineReadout,
     PopulationRate,
+    PopulationRateSpec,
     RatePatternInput,
     UnipolarRateInput,
 )
@@ -58,7 +59,7 @@ def test_pattern_input_drives_a_bounded_rate_vector():
 
 def test_tonic_drive_has_fixed_zero_mean_cell_diversity():
     pop = population()
-    source = TonicDrive(pop, 0.4, heterogeneity=0.1, rng=np.random.default_rng(3))
+    source = TonicDrive(pop, TonicDriveSpec(0.4, heterogeneity=0.1), np.random.default_rng(3))
     first = source.produce().drives[pop]
     second = source.produce().drives[pop]
     assert np.isclose(float(np.mean(first)), 0.4)
@@ -68,7 +69,7 @@ def test_tonic_drive_has_fixed_zero_mean_cell_diversity():
 
 def test_population_rate_decodes_monotonically_and_resets():
     pop = population()
-    decoder = PopulationRate(pop, decay=0.5)
+    decoder = PopulationRate(pop, PopulationRateSpec(decay=0.5))
     decoder.observe(spikes(pop, 1))
     low = decoder.rate
     decoder.observe(spikes(pop, 4))
@@ -81,7 +82,7 @@ def test_population_rate_decodes_monotonically_and_resets():
 
 def test_dopamine_baseline_and_symmetric_deadzone():
     pop = population()
-    rate = PopulationRate(pop, decay=0.0)
+    rate = PopulationRate(pop, PopulationRateSpec(decay=0.0))
     dopamine = DopamineReadout(rate, baseline=0.5, deadzone=0.1)
     assert dopamine.decode(0.5) == 0.0
     assert dopamine.decode(0.55) == 0.0
@@ -96,7 +97,7 @@ def test_dopamine_readout_decodes_the_rate_observed_once_by_the_session():
     builder.add_population("DA", 4)
     session = builder.compile(1)
     population = session.snn.layout.population("DA")
-    rate = PopulationRate(population, decay=0.5)
+    rate = PopulationRate(population, PopulationRateSpec(decay=0.5))
     dopamine = DopamineReadout(rate, baseline=0.25, deadzone=0.0)
     session.add(rate, dopamine)
     session.snn.neurons.voltage[:] = 3.0

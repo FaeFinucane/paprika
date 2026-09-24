@@ -13,9 +13,11 @@ from typing import Any
 import numpy as np
 from numpy.typing import ArrayLike
 
+from ..builder import PopulationPluginSpec
 from ..network.population import Population
 from ..network.snn import Spikes
-from .plugins import Drives, DriveSource, Observer
+from ..session import Session
+from .plugins import Drives, DriveSource, Hook, Observer
 
 
 @dataclass
@@ -115,11 +117,11 @@ class PopulationRate(Observer):
     """Low-pass estimate of a population's mean spike probability."""
 
     population: Population[Any]
-    decay: float = 0.95
+    spec: PopulationRateSpec
     _value: float = field(default=0.0, init=False, repr=False)
 
     def __post_init__(self) -> None:
-        if not 0.0 <= self.decay < 1.0:
+        if not 0.0 <= self.spec.decay < 1.0:
             raise ValueError("decay must be in [0, 1)")
 
     @property
@@ -136,7 +138,7 @@ class PopulationRate(Observer):
 
     def observe(self, spikes: Spikes) -> None:
         current = float(np.mean(spikes.population(self.population)))
-        self._value = self.decay * self._value + (1.0 - self.decay) * current
+        self._value = self.spec.decay * self._value + (1.0 - self.spec.decay) * current
 
     def reset(self) -> None:
         self._value = 0.0
@@ -195,3 +197,15 @@ class DopamineReadout(Observer):
         self._value = 0.0
 
     clear = reset
+
+
+@dataclass(frozen=True, slots=True)
+class PopulationRateSpec(PopulationPluginSpec):
+    """Population-local declaration for :class:`PopulationRate`."""
+
+    decay: float = 0.95
+
+    def build_population_hooks(
+        self, _session: Session, population: Population[Any], _rng: np.random.Generator
+    ) -> tuple[Hook, ...]:
+        return (PopulationRate(population, self),)

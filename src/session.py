@@ -73,6 +73,30 @@ class Session:
                 raise TypeError("session hook does not implement a lifecycle role")
             self._hooks.append(hook)
 
+    def remove(self, *hooks: Hook) -> None:
+        """Unregister hooks from every lifecycle role they implement.
+
+        This is intentionally identity-based, mirroring ``add``. It supports
+        temporary experimental ablations without adding behaviour flags to the
+        circuit or plasticity implementation.
+        """
+        for hook in hooks:
+            if not any(hook is registered for registered in self._hooks):
+                raise ValueError("session hook is not registered")
+            self._hooks = [registered for registered in self._hooks if registered is not hook]
+            self._drive_sources = [
+                registered for registered in self._drive_sources if registered is not hook
+            ]
+            self._observers = [
+                registered for registered in self._observers if registered is not hook
+            ]
+            self._adaptations = [
+                registered for registered in self._adaptations if registered is not hook
+            ]
+            self._stateful_adaptations = [
+                registered for registered in self._stateful_adaptations if registered is not hook
+            ]
+
     @contextmanager
     def frozen_adaptations(self):
         """Temporarily run the circuit without any adaptation-side mutation."""

@@ -80,3 +80,25 @@ def test_session_add_registers_every_lifecycle_role_once():
 
     session.tick()
     assert events == ["observe:0.1", "propose:0.1"]
+
+
+def test_session_remove_unregisters_every_lifecycle_role_and_can_be_reversed():
+    builder = NetworkBuilder()
+    builder.add_population("POPULATION", 1)
+    session = builder.compile(1)
+    events: list[str] = []
+    adaptation = _Adaptation(session.snn, events, 0.1)
+    session.add(adaptation)
+
+    session.remove(adaptation)
+
+    assert all(observer is not adaptation for observer in session.observers)
+    assert all(registered is not adaptation for registered in session.adaptations)
+    session.tick()
+    assert events == []
+    with pytest.raises(ValueError, match="not registered"):
+        session.remove(adaptation)
+
+    session.add(adaptation)
+    session.tick()
+    assert events == ["observe:0.1", "propose:0.1"]

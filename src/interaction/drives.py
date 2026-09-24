@@ -7,10 +7,12 @@ from typing import Any
 
 import numpy as np
 
+from ..builder import PopulationPluginSpec
 from ..network.adjustments import NetworkAdjustment
 from ..network.population import Population
 from ..network.snn import SNN, Spikes
-from .plugins import Drives, DriveSource, StatefulAdaptation
+from ..session import Session
+from .plugins import Drives, DriveSource, Hook, StatefulAdaptation
 
 
 @dataclass
@@ -18,21 +20,25 @@ class TonicDrive(DriveSource):
     """A named tonic current source with optional fixed cell diversity."""
 
     population: Population[Any]
-    current: float
-    heterogeneity: float = 0.0
+    spec: TonicDriveSpec
     rng: np.random.Generator = field(default_factory=np.random.default_rng)
     _currents: np.ndarray = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         if (
-            not np.isfinite(self.current)
-            or not np.isfinite(self.heterogeneity)
-            or self.heterogeneity < 0
+            not np.isfinite(self.spec.current)
+            or not np.isfinite(self.spec.heterogeneity)
+            or self.spec.heterogeneity < 0
         ):
             raise ValueError("tonic current must be finite and heterogeneity non-negative")
-        variation = self.rng.normal(0.0, self.heterogeneity, self.population.count)
+        variation = self.rng.normal(0.0, self.spec.heterogeneity, self.population.count)
         variation -= float(np.mean(variation))
-        self._currents = self.current + variation
+        self._currents = self.spec.current + variation
+
+    @property
+    def current(self) -> float:
+        """Mean configured tonic current for diagnostic reporting."""
+        return self.spec.current
 
     def produce(self) -> Drives:
         return Drives({self.population: self._currents})
@@ -48,29 +54,25 @@ class HomeostaticDrive(DriveSource, StatefulAdaptation):
     """
 
     population: Population[Any]
-    target_rate: float
-    learning_rate: float = 0.0001
-    rate_decay: float = 0.999
-    minimum_current: float = -0.1
-    maximum_current: float = 0.1
-    initial_current: float = 0.0
-    enabled: bool = True
+    spec: HomeostaticDriveSpec
     _rate: float = field(default=0.0, init=False, repr=False)
     _current: float = field(init=False, repr=False)
     _proposed_current: float | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         if (
-            not 0 <= self.target_rate <= 1
-            or self.learning_rate < 0
-            or not 0 <= self.rate_decay < 1
-            or not np.isfinite(self.minimum_current)
-            or not np.isfinite(self.maximum_current)
-            or self.minimum_current > self.maximum_current
-            or not self.minimum_current <= self.initial_current <= self.maximum_current
+            not 0 <= self.spec.target_rate <= 1
+            or self.spec.learning_rate < 0
+            or not 0 <= self.spec.rate_decay < 1
+            or not np.isfinite(self.spec.minimum_current)
+            or not np.isfinite(self.spec.maximum_current)
+            or self.spec.minimum_current > self.spec.maximum_current
+            or not self.spec.minimum_current
+            <= self.spec.initial_current
+            <= self.spec.maximum_current
         ):
             raise ValueError("invalid homeostatic-drive configuration")
-        self._current = self.initial_current
+        self._current = self.spec.initial_current
 
     @property
     def rate(self) -> float:
@@ -78,24 +80,22 @@ class HomeostaticDrive(DriveSource, StatefulAdaptation):
 
     @property
     def current(self) -> float:
-        """Current emitted on the next tick; zero when the drive is disabled."""
-        return self._current if self.enabled else 0.0
+        """Current emitted on the next tick."""
+        return self._current
 
     def produce(self) -> Drives:
-        if not self.enabled:
-            return Drives()
         return Drives({self.population: np.full(self.population.count, self._current)})
 
     def observe(self, spikes: Spikes) -> None:
         observed = float(np.mean(spikes.population(self.population)))
-        self._rate = self.rate_decay * self._rate + (1.0 - self.rate_decay) * observed
+        self._rate = self.spec.rate_decay * self._rate + (1.0 - self.spec.rate_decay) * observed
 
     def propose(self, _snn: SNN) -> NetworkAdjustment:
         self._proposed_current = float(
             np.clip(
-                self._current + self.learning_rate * (self.target_rate - self._rate),
-                self.minimum_current,
-                self.maximum_current,
+                self._current + self.spec.learning_rate * (self.spec.target_rate - self._rate),
+                self.spec.minimum_current,
+                self.spec.maximum_current,
             )
         )
         return NetworkAdjustment()
@@ -105,3 +105,33 @@ class HomeostaticDrive(DriveSource, StatefulAdaptation):
             raise RuntimeError("homeostatic drive must propose before commit")
         self._current = self._proposed_current
         self._proposed_current = None
+
+
+@dataclass(frozen=True, slots=True)
+class TonicDriveSpec(PopulationPluginSpec):
+    """Population-local declaration for :class:`TonicDrive`."""
+
+    current: float
+    heterogeneity: float = 0.0
+
+    def build_population_hooks(
+        self, _session: Session, population: Population[Any], rng: np.random.Generator
+    ) -> tuple[Hook, ...]:
+        return (TonicDrive(population, self, rng),)
+
+
+@dataclass(frozen=True, slots=True)
+class HomeostaticDriveSpec(PopulationPluginSpec):
+    """Population-local declaration for :class:`HomeostaticDrive`."""
+
+    target_rate: float
+    learning_rate: float = 0.0001
+    rate_decay: float = 0.999
+    minimum_current: float = -0.1
+    maximum_current: float = 0.1
+    initial_current: float = 0.0
+
+    def build_population_hooks(
+        self, _session: Session, population: Population[Any], _rng: np.random.Generator
+    ) -> tuple[Hook, ...]:
+        return (HomeostaticDrive(population, self),)

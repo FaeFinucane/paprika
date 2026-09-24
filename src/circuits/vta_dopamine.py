@@ -1,236 +1,181 @@
-"""Cue, inferred-state, temporal, and VTA dopamine circuit."""
+"""Reusable VTA dopamine populations and their intrinsic modulation pathway."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 
-from ..builder import (
-    HomeostaticDriveSpec,
-    NetworkBuilder,
-    PopulationHandle,
-    PopulationRateSpec,
-    TonicDriveSpec,
-)
+from ..builder import NetworkBuilder, PluginSpec
+from ..interaction.drives import HomeostaticDriveSpec, TonicDriveSpec
 from ..interaction.plasticity import DopamineSTDP
 from ..interaction.plugins import Hook
-from ..interaction.rates import DopamineReadout, PopulationRate, RatePatternInput, UnipolarRateInput
+from ..interaction.rates import DopamineReadout, PopulationRate, PopulationRateSpec
 from ..network.connectivity import FanInSpec, StrengthSpec
 from ..network.population import Population
 from ..session import Session
-from .asymmetric_recurrent import (
-    AsymmetricRecurrentHandle,
-    AsymmetricRecurrentSpec,
-    add_asymmetric_recurrent_circuit,
-)
-from .attractor import AttractorHandle, AttractorSpec, add_attractor
+
+VTA_DOPAMINE_LEARNING_RATE = 0.0001
+
+
+@dataclass(frozen=True, slots=True)
+class VtaDopamineSpec:
+    """Intrinsic VTA population dimensions and modulation parameters."""
+
+    name: str = "VTA"
+    inhibitory_size: int = 16
+    dopamine_size: int = 32
+    inhibitory_fanin: int = 8
+    inhibitory_strength: float = 0.22
+    dopamine_tonic_drive: float = 0.42
+    dopamine_tonic_heterogeneity: float = 0.06
+    dopamine_target_rate: float = 0.25
+    dopamine_rate_decay: float = 0.8
+    dopamine_baseline: float = 0.25
+    dopamine_deadzone: float = 0.04
+    learning_rate: float = VTA_DOPAMINE_LEARNING_RATE
+
+
+@dataclass(frozen=True, slots=True)
+class VtaDopamineHandle:
+    """Ports of the reusable VTA dopamine motif.
+
+    Parent circuit assemblies choose every incoming pathway.  In particular,
+    direct prediction, temporal prediction, and sensory outcome projections do
+    not belong to this component.
+    """
+
+    inhibitory: str
+    dopamine: str
+
+    @property
+    def inhibitory_input(self) -> str:
+        return self.inhibitory
+
+    @property
+    def dopamine_input(self) -> str:
+        return self.dopamine
 
 
 @dataclass
-class DopamineCircuit:
-    """A continuously running VTA circuit with no scalar value-comparator path."""
+class VtaDopamineSystem:
+    """Compiled VTA populations, readout, and one session-managed DA rule."""
 
-    session: Session
-    populations: dict[str, Population[Any]]
-    cue_input: RatePatternInput
-    outcome_positive: UnipolarRateInput
-    outcome_negative: UnipolarRateInput
-    inferred_state: AttractorHandle
-    temporal: AsymmetricRecurrentHandle
+    inhibitory: Population
+    dopamine_population: Population
     dopamine_rate: PopulationRate
     dopamine: DopamineReadout
     stdp: DopamineSTDP
 
-    def present_cue(self, pattern: np.ndarray, duration: int | None = None) -> None:
-        """Present a bounded unipolar cue without clearing ongoing network state."""
-        self.cue_input.write(pattern, duration)
-
-    def deliver_outcome(self, value: float, duration: int | None = None) -> None:
-        """Route one signed outcome through its fixed VTA-DA sensory pathway."""
-        if not np.isfinite(value) or not -1.0 <= value <= 1.0:
-            raise ValueError("outcome must be finite and in [-1, 1]")
-        if value >= 0:
-            self.outcome_positive.write(float(value), duration)
-        else:
-            self.outcome_negative.write(float(-value), duration)
-
-    def tick(self):
-        return self.session.tick()
-
 
 @dataclass(frozen=True, slots=True)
-class VtaDopamineCircuitDeclaration:
-    """Uncompiled VTA circuit declared into a mutable network builder."""
+class _DopamineSystemPluginSpec(PluginSpec):
+    dopamine_name: str
+    baseline: float
+    deadzone: float
+    learning_rate: float
 
-    builder: NetworkBuilder
-    cue: PopulationHandle
-    outcome_positive: PopulationHandle
-    outcome_negative: PopulationHandle
-    inferred_state: AttractorHandle
-    temporal: AsymmetricRecurrentHandle
-    vta_inhibitory: PopulationHandle
-    vta_dopamine: PopulationHandle
-
-    def build(self, seed: int = 0, *, enable_dopamine_learning: bool = True) -> DopamineCircuit:
-        """Compile this declaration and attach its session-local interaction hooks."""
-        return _compile_dopamine_circuit(self, seed, enable_dopamine_learning)
+    def build_hooks(self, session: Session, _rng: np.random.Generator) -> tuple[Hook, ...]:
+        population = session.snn.layout.population(self.dopamine_name)
+        rate = next(
+            observer
+            for observer in session.observers
+            if isinstance(observer, PopulationRate) and observer.population == population
+        )
+        dopamine = DopamineReadout(rate, baseline=self.baseline, deadzone=self.deadzone)
+        return dopamine, DopamineSTDP(session.snn, dopamine, learning_rate=self.learning_rate)
 
 
-def add_vta_dopamine_circuit(
-    builder: NetworkBuilder,
-    *,
-    attractor: AttractorSpec = AttractorSpec(),
-    temporal: AsymmetricRecurrentSpec = AsymmetricRecurrentSpec(),
-) -> VtaDopamineCircuitDeclaration:
-    """Declare the VTA dopamine circuit into ``builder`` without compiling it."""
-    cue = builder.add_feature_population("CUE", ("CUE",), width=16)
-    outcome_positive = builder.add_population("OUTCOME_POSITIVE", 16)
-    outcome_negative = builder.add_population("OUTCOME_NEGATIVE", 16, output="inhibitory")
-    inferred_state = add_attractor(builder, attractor, cue=cue)
-    timer = add_asymmetric_recurrent_circuit(builder, temporal, state=inferred_state)
-    vta_inhibitory = builder.add_population(
-        "VTA_INHIB",
-        16,
+def add_vta_dopamine(
+    builder: NetworkBuilder, spec: VtaDopamineSpec = VtaDopamineSpec()
+) -> VtaDopamineHandle:
+    """Declare VTA-DA/VTA-INHIB and their intrinsic learnable inhibition.
+
+    The only projection owned here is ``VTA_INHIB -> VTA_DA``.  All projections
+    from sensory, state, or temporal circuits are declared by the parent that
+    composes this motif.
+    """
+    if (
+        min(spec.inhibitory_size, spec.dopamine_size, spec.inhibitory_fanin) <= 0
+        or spec.inhibitory_fanin > spec.inhibitory_size
+        or not 0 <= spec.inhibitory_strength <= 0.8
+        or not 0 <= spec.dopamine_target_rate <= 1
+        or not 0 <= spec.dopamine_rate_decay < 1
+        or not 0 <= spec.dopamine_baseline <= 1
+        or not 0 <= spec.dopamine_deadzone < 1
+        or spec.learning_rate < 0
+    ):
+        raise ValueError("invalid VTA dopamine configuration")
+
+    inhibitory = f"{spec.name}_INHIB"
+    dopamine = f"{spec.name}_DA"
+    builder.add_population(
+        inhibitory,
+        spec.inhibitory_size,
         output="inhibitory",
         dopamine_response="aligned",
         plugins=(HomeostaticDriveSpec(0.03),),
     )
-    vta_dopamine = builder.add_population(
-        "VTA_DA",
-        32,
+    builder.add_population(
+        dopamine,
+        spec.dopamine_size,
         output="modulatory",
         dopamine_response="aligned",
         plugins=(
-            TonicDriveSpec(0.42, heterogeneity=0.06),
-            HomeostaticDriveSpec(0.25, learning_rate=0.00001),
-            PopulationRateSpec(decay=0.8),
+            TonicDriveSpec(
+                spec.dopamine_tonic_drive, heterogeneity=spec.dopamine_tonic_heterogeneity
+            ),
+            HomeostaticDriveSpec(spec.dopamine_target_rate, learning_rate=0.00001),
+            PopulationRateSpec(decay=spec.dopamine_rate_decay),
         ),
     )
-
-    direct_state_to_dopamine = StrengthSpec(0.12, 0.02, maximum=0.8)
-    temporal_to_inhibitory = StrengthSpec(0.10, 0.02, maximum=0.8)
-    outcome_strength = StrengthSpec(0.30, 0.02, maximum=0.8)
-    inhibitory = StrengthSpec(0.22, 0.02, maximum=0.8)
-    state_fanin = min(8, attractor.excitatory_size)
-    temporal_fanin = min(8, temporal.excitatory_size)
-    vta_inhibitory_fanin = 8
-    outcome_fanin = 8
     builder.connect(
-        inferred_state.excitatory,
-        vta_dopamine,
-        FanInSpec(state_fanin),
-        direct_state_to_dopamine,
-        "dopamine_stdp",
-        True,
-        "INFERRED_STATE_to_VTA_DA",
-    )
-    builder.connect(
-        timer.excitatory,
-        vta_inhibitory,
-        FanInSpec(temporal_fanin),
-        temporal_to_inhibitory,
-        "dopamine_stdp",
-        True,
-        f"{timer.excitatory}_to_VTA_INHIB",
-    )
-    builder.connect(
-        vta_inhibitory,
-        vta_dopamine,
-        FanInSpec(vta_inhibitory_fanin),
         inhibitory,
+        dopamine,
+        FanInSpec(spec.inhibitory_fanin),
+        StrengthSpec(spec.inhibitory_strength, 0.02, maximum=0.8),
         "dopamine_stdp",
         False,
-        "VTA_INHIB_to_VTA_DA",
+        f"{inhibitory}_to_{dopamine}",
     )
-    builder.connect(
-        outcome_positive,
-        vta_dopamine,
-        FanInSpec(outcome_fanin),
-        outcome_strength,
-        "fixed",
-        False,
-        "OUTCOME_POSITIVE_to_VTA_DA",
+    builder.add_plugin(
+        _DopamineSystemPluginSpec(
+            dopamine,
+            spec.dopamine_baseline,
+            spec.dopamine_deadzone,
+            spec.learning_rate,
+        )
     )
-    builder.connect(
-        outcome_negative,
-        vta_dopamine,
-        FanInSpec(outcome_fanin),
-        outcome_strength,
-        "fixed",
-        False,
-        "OUTCOME_NEGATIVE_to_VTA_DA",
-    )
-
-    return VtaDopamineCircuitDeclaration(
-        builder,
-        cue,
-        outcome_positive,
-        outcome_negative,
-        inferred_state,
-        timer,
-        vta_inhibitory,
-        vta_dopamine,
-    )
+    return VtaDopamineHandle(inhibitory, dopamine)
 
 
-def build_dopamine_circuit(
-    seed: int = 0, *, enable_dopamine_learning: bool = True
-) -> DopamineCircuit:
-    """Build the default VTA dopamine circuit in one call."""
-    return add_vta_dopamine_circuit(NetworkBuilder()).build(
-        seed, enable_dopamine_learning=enable_dopamine_learning
-    )
-
-
-def _compile_dopamine_circuit(
-    declaration: VtaDopamineCircuitDeclaration,
-    seed: int,
-    enable_dopamine_learning: bool,
-) -> DopamineCircuit:
-    session = declaration.builder.compile(seed)
-    populations = {
-        population.spec.name: population for population in session.snn.layout.populations
-    }
-    dopamine_rate = next(
+def compiled_vta_dopamine(session: Session, handle: VtaDopamineHandle) -> VtaDopamineSystem:
+    """Return the runtime VTA system automatically installed during compilation."""
+    inhibitory = session.snn.layout.population(handle.inhibitory)
+    dopamine_population = session.snn.layout.population(handle.dopamine)
+    rate = next(
         observer
         for observer in session.observers
-        if isinstance(observer, PopulationRate)
-        and observer.population == populations[declaration.vta_dopamine.name]
+        if isinstance(observer, PopulationRate) and observer.population == dopamine_population
     )
-    dopamine = DopamineReadout(dopamine_rate, baseline=0.25, deadzone=0.04)
-    stdp = DopamineSTDP(session.snn, dopamine, learning_rate=0.002)
-    cue_input = RatePatternInput(
-        populations[declaration.cue.name], np.random.default_rng([seed, 1])
+    dopamine = next(
+        observer
+        for observer in session.observers
+        if isinstance(observer, DopamineReadout) and observer.source is rate
     )
-    outcome_positive = UnipolarRateInput(
-        populations[declaration.outcome_positive.name], np.random.default_rng([seed, 2])
+    stdp = next(
+        adaptation
+        for adaptation in session.adaptations
+        if isinstance(adaptation, DopamineSTDP) and adaptation.dopamine is dopamine
     )
-    outcome_negative = UnipolarRateInput(
-        populations[declaration.outcome_negative.name], np.random.default_rng([seed, 3])
-    )
-    hooks: list[Hook] = [cue_input, outcome_positive, outcome_negative, dopamine]
-    if enable_dopamine_learning:
-        hooks.append(stdp)
-    session.add(*hooks)
-    return DopamineCircuit(
-        session,
-        populations,
-        cue_input,
-        outcome_positive,
-        outcome_negative,
-        declaration.inferred_state,
-        declaration.temporal,
-        dopamine_rate,
-        dopamine,
-        stdp,
-    )
+    return VtaDopamineSystem(inhibitory, dopamine_population, rate, dopamine, stdp)
 
 
 __all__ = [
-    "DopamineCircuit",
-    "VtaDopamineCircuitDeclaration",
-    "add_vta_dopamine_circuit",
-    "build_dopamine_circuit",
+    "VTA_DOPAMINE_LEARNING_RATE",
+    "VtaDopamineHandle",
+    "VtaDopamineSpec",
+    "VtaDopamineSystem",
+    "add_vta_dopamine",
+    "compiled_vta_dopamine",
 ]

@@ -7,10 +7,12 @@ from typing import Any
 
 import numpy as np
 
+from ...builder import PopulationPluginSpec
 from ...network.adjustments import NetworkAdjustment
 from ...network.population import Population
 from ...network.snn import SNN, Spikes
-from ..plugins import SpikeAdaptation
+from ...session import Session
+from ..plugins import Hook, SpikeAdaptation
 
 
 @dataclass
@@ -19,13 +21,15 @@ class SynapticScaling(SpikeAdaptation):
 
     snn: SNN
     population: Population[Any]
-    target_rate: float
-    learning_rate: float = 0.00001
-    rate_decay: float = 0.9999
+    spec: SynapticScalingSpec
     _rate: float = 0.0
 
     def __post_init__(self) -> None:
-        if not 0 <= self.target_rate <= 1 or self.learning_rate < 0 or not 0 <= self.rate_decay < 1:
+        if (
+            not 0 <= self.spec.target_rate <= 1
+            or self.spec.learning_rate < 0
+            or not 0 <= self.spec.rate_decay < 1
+        ):
             raise ValueError("invalid synaptic-scaling configuration")
         if self.population.layout_fingerprint != self.snn.layout.fingerprint:
             raise ValueError("population belongs to another network")
@@ -36,7 +40,7 @@ class SynapticScaling(SpikeAdaptation):
 
     def observe(self, spikes: Spikes) -> None:
         observed = float(np.mean(spikes.population(self.population)))
-        self._rate = self.rate_decay * self._rate + (1.0 - self.rate_decay) * observed
+        self._rate = self.spec.rate_decay * self._rate + (1.0 - self.spec.rate_decay) * observed
 
     def propose(self, snn: SNN) -> NetworkAdjustment:
         if snn is not self.snn:
@@ -49,7 +53,21 @@ class SynapticScaling(SpikeAdaptation):
         mask = synapses.active & synapses.scalable & source_is_excitatory & target
         if not mask.any():
             return NetworkAdjustment()
-        factor = float(np.exp(self.learning_rate * (self.target_rate - self._rate)))
+        factor = float(np.exp(self.spec.learning_rate * (self.spec.target_rate - self._rate)))
         delta = np.zeros_like(synapses.strength)
         delta[mask] = synapses.strength[mask] * (factor - 1.0)
         return NetworkAdjustment(delta, mask)
+
+
+@dataclass(frozen=True, slots=True)
+class SynapticScalingSpec(PopulationPluginSpec):
+    """Population-local declaration for :class:`SynapticScaling`."""
+
+    target_rate: float
+    learning_rate: float = 0.00001
+    rate_decay: float = 0.9999
+
+    def build_population_hooks(
+        self, session: Session, population: Population[Any], _rng: np.random.Generator
+    ) -> tuple[Hook, ...]:
+        return (SynapticScaling(session.snn, population, self),)

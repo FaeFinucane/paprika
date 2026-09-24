@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TypeAlias
+from typing import Any, Protocol
 
 import numpy as np
 
-from .interaction.drives import HomeostaticDrive, TonicDrive
-from .interaction.plasticity.homeostasis import SynapticScaling
 from .interaction.plugins import Hook
-from .interaction.rates import PopulationRate
 from .network.connectivity import (
     ConnectionSpec,
     LearningPolicy,
@@ -23,6 +20,7 @@ from .network.population import (
     FeaturePopulationSpec,
     NeuronPopulationSpec,
     OutputKind,
+    Population,
     PopulationLayout,
     PopulationSpec,
 )
@@ -30,46 +28,33 @@ from .network.snn import SNN
 from .session import Session
 
 
-@dataclass(frozen=True, slots=True)
-class TonicDriveSpec:
-    """Declarative specification for a population tonic current."""
+class PluginSpec(Protocol):
+    """A fully bound declaration that builds session hooks after compilation."""
 
-    current: float
-    heterogeneity: float = 0.0
+    def build_hooks(self, session: Session, rng: np.random.Generator) -> tuple[Hook, ...]: ...
 
 
-@dataclass(frozen=True, slots=True)
-class HomeostaticDriveSpec:
-    """Declarative specification for a population homeostatic current."""
+class PopulationPluginSpec(Protocol):
+    """Population-local settings that create hooks for one compiled population."""
 
-    target_rate: float
-    learning_rate: float = 0.0001
-    rate_decay: float = 0.999
-    minimum_current: float = -0.1
-    maximum_current: float = 0.1
-    initial_current: float = 0.0
-    enabled: bool = True
+    def build_population_hooks(
+        self,
+        session: Session,
+        population: Population[Any],
+        rng: np.random.Generator,
+    ) -> tuple[Hook, ...]: ...
 
 
 @dataclass(frozen=True, slots=True)
-class PopulationRateSpec:
-    """Declarative low-pass population-rate observer."""
+class _BoundPopulationPluginSpec(PluginSpec):
+    """Generic binding of population-local settings to a declared population."""
 
-    decay: float = 0.95
+    population_name: str
+    plugin: PopulationPluginSpec
 
-
-@dataclass(frozen=True, slots=True)
-class SynapticScalingSpec:
-    """Declarative slow scaling of explicitly scalable excitatory inputs."""
-
-    target_rate: float
-    learning_rate: float = 0.00001
-    rate_decay: float = 0.9999
-
-
-PluginSpec: TypeAlias = (
-    TonicDriveSpec | HomeostaticDriveSpec | PopulationRateSpec | SynapticScalingSpec
-)
+    def build_hooks(self, session: Session, rng: np.random.Generator) -> tuple[Hook, ...]:
+        population = session.snn.layout.population(self.population_name)
+        return self.plugin.build_population_hooks(session, population, rng)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,7 +75,7 @@ class NetworkBuilder:
     def __init__(self) -> None:
         self._populations: list[PopulationSpec] = []
         self._connections: list[ConnectionSpec] = []
-        self._plugins: list[tuple[str, PluginSpec]] = []
+        self._plugins: list[PluginSpec] = []
 
     @property
     def populations(self) -> tuple[PopulationSpec, ...]:
@@ -107,7 +92,7 @@ class NetworkBuilder:
         *,
         output: OutputKind = "excitatory",
         dopamine_response: DopamineResponse = "neutral",
-        plugins: tuple[PluginSpec, ...] = (),
+        plugins: tuple[PopulationPluginSpec, ...] = (),
     ) -> PopulationHandle:
         if isinstance(name, NeuronPopulationSpec):
             if neuron_count is not None or output != "excitatory" or dopamine_response != "neutral":
@@ -131,7 +116,7 @@ class NetworkBuilder:
         features: tuple[str, ...] = (),
         *,
         width: int | None = None,
-        plugins: tuple[PluginSpec, ...] = (),
+        plugins: tuple[PopulationPluginSpec, ...] = (),
     ) -> PopulationHandle:
         if isinstance(name, FeaturePopulationSpec):
             if features or width is not None:
@@ -144,24 +129,29 @@ class NetworkBuilder:
         self._add_population_spec(spec, plugins)
         return PopulationHandle(spec.name)
 
-    def _add_population_spec(self, spec: PopulationSpec, plugins: tuple[PluginSpec, ...]) -> None:
+    def _add_population_spec(
+        self, spec: PopulationSpec, plugins: tuple[PopulationPluginSpec, ...]
+    ) -> None:
         if any(existing.name == spec.name for existing in self._populations):
             raise ValueError(f"population names must be unique: {spec.name!r}")
         self._populations.append(spec)
         for plugin in plugins:
             self.attach(spec.name, plugin)
 
-    def attach(self, population: str | PopulationHandle, plugin: PluginSpec) -> None:
-        """Attach a declarative population-local plugin."""
+    def attach(self, population: str | PopulationHandle, plugin: PopulationPluginSpec) -> None:
+        """Bind population-local plugin settings to a declared population."""
         name = population.name if isinstance(population, PopulationHandle) else population
-        if not isinstance(
-            plugin,
-            (TonicDriveSpec, HomeostaticDriveSpec, PopulationRateSpec, SynapticScalingSpec),
-        ):
-            raise TypeError("unsupported plugin specification")
         if not any(spec.name == name for spec in self._populations):
             raise KeyError(f"unknown population {name!r}")
-        self._plugins.append((name, plugin))
+        if not callable(getattr(plugin, "build_population_hooks", None)):
+            raise TypeError("population plugin must define build_population_hooks")
+        self._plugins.append(_BoundPopulationPluginSpec(name, plugin))
+
+    def add_plugin(self, plugin: PluginSpec) -> None:
+        """Declare a system-level plugin whose hooks are built at compilation."""
+        if not callable(getattr(plugin, "build_hooks", None)):
+            raise TypeError("plugin must define build_hooks(session, rng)")
+        self._plugins.append(plugin)
 
     def connect(
         self,
@@ -219,38 +209,8 @@ class NetworkBuilder:
         root_rng = np.random.default_rng(int(seed))
         layout = PopulationLayout.build(self._populations)
         snn = SNN.build(layout, build_synapses(layout, self._connections, root_rng))
-        populations = {population.spec.name: population for population in layout.populations}
-        hooks: list[Hook] = []
-        for index, (name, plugin) in enumerate(self._plugins):
-            population = populations[name]
+        session = Session(snn)
+        for index, plugin in enumerate(self._plugins):
             plugin_rng = np.random.default_rng(root_rng.integers(0, 2**63, dtype=np.int64) + index)
-            if isinstance(plugin, TonicDriveSpec):
-                hooks.append(
-                    TonicDrive(population, plugin.current, plugin.heterogeneity, plugin_rng)
-                )
-            elif isinstance(plugin, HomeostaticDriveSpec):
-                hooks.append(
-                    HomeostaticDrive(
-                        population,
-                        plugin.target_rate,
-                        plugin.learning_rate,
-                        plugin.rate_decay,
-                        plugin.minimum_current,
-                        plugin.maximum_current,
-                        plugin.initial_current,
-                        plugin.enabled,
-                    )
-                )
-            elif isinstance(plugin, PopulationRateSpec):
-                hooks.append(PopulationRate(population, plugin.decay))
-            elif isinstance(plugin, SynapticScalingSpec):
-                hooks.append(
-                    SynapticScaling(
-                        snn,
-                        population,
-                        plugin.target_rate,
-                        plugin.learning_rate,
-                        plugin.rate_decay,
-                    )
-                )
-        return Session.build(snn, hooks)
+            session.add(*plugin.build_hooks(session, plugin_rng))
+        return session
